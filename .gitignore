@@ -417,7 +417,10 @@ FodyWeavers.xsd
 *.msm
 *.msp
 
-## Custom additions for Dash DayTrip API
+# Add to existing .gitignore
+@"
+
+## Custom additions for this project
 ## Sensitive configuration files
 **/appsettings.json
 **/appsettings.Development.json
@@ -431,3 +434,7 @@ runtimes/
 *.dll
 *.exe
 *.pdb
+
+## Keep project DLLs
+!Dash_DayTrip_API.dll
+"@ | Add-Content -Path .gitignore -Encoding utf8
