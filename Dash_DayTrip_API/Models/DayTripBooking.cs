@@ -43,7 +43,8 @@ namespace Dash_DayTrip_API.Models
         public string? TravelDateRemarks { get; set; }
         public string? AwardRemarks { get; set; }
         public string? Notes { get; set; }
-        
+        public string? PaymentReceipt { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
         
