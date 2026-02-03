@@ -11,10 +11,19 @@ namespace Dash_DayTrip_API.Models
         
         [Required]
         public string FormId { get; set; } = string.Empty;
-        
+
         // Staff Settings (stored as JSON)
         public string? SalesExecutives { get; set; }
-        
+
+        // General Settings
+        public string? TaxIdNumber { get; set; }
+
+        public string? Currency { get; set; }
+
+        public string? NextDayCutoffTime { get; set; }
+
+        public int? MaxGuestPerDay { get; set; }
+
         // Fees & Invoicing Settings
         [MaxLength(20)]
         public string? DepositMode { get; set; } = "fixed"; // per_pax or fixed

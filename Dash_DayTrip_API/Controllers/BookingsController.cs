@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Dash_DayTrip_API.Models;
+using Dash_DayTrip_API.Models.Responses; // ADD THIS
 using Dash_DayTrip_API.Data;
 
 namespace Dash_DayTrip_API.Controllers
@@ -11,10 +12,12 @@ namespace Dash_DayTrip_API.Controllers
     public class BookingsController : ControllerBase
     {
         private readonly ApiContext _context;
+        private readonly ILogger<BookingsController> _logger; //ADD THIS
 
-        public BookingsController(ApiContext context)
+        public BookingsController(ApiContext context, ILogger<BookingsController> logger) // UPDATE THIS
         {
             _context = context;
+            _logger = logger; // ADD THIS
         }
 
         // GET: api/Bookings
