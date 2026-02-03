@@ -42,6 +42,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 // Enable CORS BEFORE other middleware
 app.UseCors("AllowAll");
 
+app.UseStaticFiles();
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
