@@ -39,11 +39,15 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI();
 }
 
-// Enable CORS BEFORE other middleware
+app.UseStaticFiles();
+
+// Enable CORS BEFORE routing and authorization
+app.UseRouting();
 app.UseCors("AllowAll");
 
-app.UseStaticFiles();
+//Comment Out When using local
 app.UseHttpsRedirection();
+
 app.UseAuthorization();
 app.MapControllers();
 
