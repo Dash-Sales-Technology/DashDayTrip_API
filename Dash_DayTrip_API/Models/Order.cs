@@ -16,7 +16,6 @@ namespace Dash_DayTrip_API.Models
 
         // Customer Information
         public string? SalesExecutive { get; set; }
-        public string? Salutation { get; set; }
         public string CustomerName { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string? Nationality { get; set; }
