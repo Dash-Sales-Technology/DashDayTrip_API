@@ -45,7 +45,14 @@ namespace Dash_DayTrip_API.Models
         
         [MaxLength(20)]
         public string? GratuityCalcType { get; set; } // per_pax or per_unit
-        
+
+        // Deposit Configuration 
+        [Column(TypeName = "decimal(10,2)")]
+        public decimal? DepositAmount { get; set; }
+
+        [MaxLength(20)]
+        public string? DepositMode { get; set; } // per_pax or per_package
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
         

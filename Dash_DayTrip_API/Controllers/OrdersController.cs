@@ -19,11 +19,13 @@ namespace Dash_DayTrip_API.Controllers
     {
         private readonly ApiContext _context;
         private readonly ILogger<OrdersController> _logger;
+        private readonly IConfiguration _configuration;
 
-        public OrdersController(ApiContext context, ILogger<OrdersController> logger)
+        public OrdersController(ApiContext context, ILogger<OrdersController> logger, IConfiguration configuration)
         {
             _context = context;
             _logger = logger;
+            _configuration = configuration;
         }
 
         // GET: api/Orders
@@ -220,6 +222,119 @@ namespace Dash_DayTrip_API.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { OrderId = id, NewStatus = request.Status });
+        }
+
+        // POST: api/Orders/{id}/receipt - Upload receipt image
+        [HttpPost("{id}/receipt")]
+        public async Task<IActionResult> UploadReceipt(string id, IFormFile file)
+        {
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null)
+            {
+                return NotFound(new { message = "Order not found" });
+            }
+
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest(new { message = "No file provided" });
+            }
+
+            // Validate file type
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".pdf" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
+            {
+                return BadRequest(new { message = "Invalid file type. Allowed: jpg, jpeg, png, gif, pdf" });
+            }
+
+            try
+            {
+                // Get paths from configuration
+                var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DayTripImages";
+                var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://localhost:8081";
+                
+                var receiptFolder = Path.Combine(basePath, "Image", "Receipt");
+                
+                // Ensure directory exists
+                Directory.CreateDirectory(receiptFolder);
+
+                // Generate unique filename
+                var fileName = $"{id}_{DateTime.UtcNow:yyyyMMddHHmmss}{extension}";
+                var fullPath = Path.Combine(receiptFolder, fileName);
+
+                // Delete old receipt file if exists
+                if (!string.IsNullOrEmpty(order.PaymentReceipt))
+                {
+                    var oldFileName = Path.GetFileName(new Uri(order.PaymentReceipt).LocalPath);
+                    var oldFilePath = Path.Combine(receiptFolder, oldFileName);
+                    if (System.IO.File.Exists(oldFilePath))
+                    {
+                        System.IO.File.Delete(oldFilePath);
+                    }
+                }
+
+                // Save file
+                using (var stream = new FileStream(fullPath, FileMode.Create))
+                {
+                    await file.CopyToAsync(stream);
+                }
+
+                // Update database with URL
+                order.PaymentReceipt = $"{baseUrl}/Image/Receipt/{fileName}";
+                order.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Receipt uploaded for order {OrderId}: {Url}", id, order.PaymentReceipt);
+
+                return Ok(new { 
+                    message = "Receipt uploaded successfully",
+                    imageUrl = order.PaymentReceipt 
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error uploading receipt for order {OrderId}", id);
+                return StatusCode(500, new { message = "Error uploading file", error = ex.Message });
+            }
+        }
+
+        // DELETE: api/Orders/{id}/receipt - Delete receipt image
+        [HttpDelete("{id}/receipt")]
+        public async Task<IActionResult> DeleteReceipt(string id)
+        {
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null)
+            {
+                return NotFound(new { message = "Order not found" });
+            }
+
+            if (string.IsNullOrEmpty(order.PaymentReceipt))
+            {
+                return NotFound(new { message = "No receipt found for this order" });
+            }
+
+            try
+            {
+                var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DayTripImages";
+                var fileName = Path.GetFileName(new Uri(order.PaymentReceipt).LocalPath);
+                var filePath = Path.Combine(basePath, "Image", "Receipt", fileName);
+
+                if (System.IO.File.Exists(filePath))
+                {
+                    System.IO.File.Delete(filePath);
+                }
+
+                order.PaymentReceipt = null;
+                order.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Receipt deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting receipt for order {OrderId}", id);
+                return StatusCode(500, new { message = "Error deleting file", error = ex.Message });
+            }
         }
 
         private bool OrderExists(string id)

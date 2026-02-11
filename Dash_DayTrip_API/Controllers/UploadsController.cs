@@ -7,12 +7,12 @@ using System.IO;
 [EnableCors("AllowAll")]
 public class UploadsController : ControllerBase
 {
-    private readonly IWebHostEnvironment _env;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<UploadsController> _logger;
 
-    public UploadsController(IWebHostEnvironment env, ILogger<UploadsController> logger)
+    public UploadsController(IConfiguration configuration, ILogger<UploadsController> logger)
     {
-        _env = env;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -23,21 +23,22 @@ public class UploadsController : ControllerBase
     {
         try
         {
-            _logger.LogInformation("Upload started. WebRootPath: {WebRoot}, ContentRootPath: {ContentRoot}", 
-                _env.WebRootPath, _env.ContentRootPath);
-
             if (file == null || file.Length == 0)
-                return BadRequest("No file uploaded");
+                return BadRequest(new { error = "No file uploaded" });
 
-            // Try WebRootPath first, fall back to ContentRootPath/wwwroot
-            var basePath = _env.WebRootPath;
-            if (string.IsNullOrEmpty(basePath))
+            // Validate file type
+            var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".pdf" };
+            var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+            if (!allowedExtensions.Contains(extension))
             {
-                basePath = Path.Combine(_env.ContentRootPath, "wwwroot");
-                _logger.LogWarning("WebRootPath was null, using: {BasePath}", basePath);
+                return BadRequest(new { error = "Invalid file type. Allowed: jpg, jpeg, png, gif, pdf" });
             }
 
-            var folderPath = Path.Combine(basePath, "uploads", "receipts");
+            // Get paths from configuration
+            var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DayTripImages";
+            var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://localhost:8081";
+
+            var folderPath = Path.Combine(basePath, "Image", "Receipt");
             _logger.LogInformation("Target folder: {FolderPath}", folderPath);
 
             if (!Directory.Exists(folderPath))
@@ -46,7 +47,7 @@ public class UploadsController : ControllerBase
                 _logger.LogInformation("Created directory: {FolderPath}", folderPath);
             }
 
-            var fileName = $"{Guid.NewGuid()}{Path.GetExtension(file.FileName)}";
+            var fileName = $"{Guid.NewGuid()}{extension}";
             var filePath = Path.Combine(folderPath, fileName);
 
             using (var stream = new FileStream(filePath, FileMode.Create))
@@ -56,7 +57,8 @@ public class UploadsController : ControllerBase
 
             _logger.LogInformation("File saved successfully: {FilePath}", filePath);
 
-            var url = $"/uploads/receipts/{fileName}";
+            // Return full URL accessible via IIS image site
+            var url = $"{baseUrl}/Image/Receipt/{fileName}";
             return Ok(new { url });
         }
         catch (Exception ex)
