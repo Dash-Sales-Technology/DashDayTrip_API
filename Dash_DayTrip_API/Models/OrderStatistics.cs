@@ -12,5 +12,7 @@ namespace Dash_DayTrip_API.Models.Responses
         public int ConfirmedCount { get; set; }
         public int CompletedCount { get; set; }
         public int CancelledCount { get; set; }
+
+        public bool IsDeleted { get; set; }
     }
 }

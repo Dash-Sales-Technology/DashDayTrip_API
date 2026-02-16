@@ -1,3 +1,4 @@
+using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
@@ -28,9 +29,15 @@ namespace Dash_DayTrip_API.Models
 
         public decimal LineTotal { get; set; }
 
+        // Timestamps for audit / soft-delete workflows
+        public DateTime? CreatedAt { get; set; }
+        public DateTime? UpdatedAt { get; set; }
+
         // Navigation property
         [ForeignKey("OrderId")]
         [JsonIgnore]
         public virtual Order? Order { get; set; }
+
+        public bool IsDeleted { get; set; }
     }
 }

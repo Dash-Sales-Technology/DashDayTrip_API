@@ -7,7 +7,6 @@ using Dash_DayTrip_API.Data;
 
 namespace Dash_DayTrip_API.Controllers
 {
-    // DTO for status updates
     public class UpdateOrderStatusRequest
     {
         public string Status { get; set; } = string.Empty;
@@ -32,9 +31,20 @@ namespace Dash_DayTrip_API.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Order>>> GetOrders()
         {
-            return await _context.Orders
-                .Include(o => o.OrderPackages)
-                .ToListAsync();
+            try
+            {
+                var orders = await _context.Orders
+                    .Include(o => o.OrderPackages)
+                    .ToListAsync();
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                // Log the exception and return details for debugging (remove stack in production)
+                _logger.LogError(ex, "GetOrders failed");
+                return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
+            }
         }
 
         // GET: api/Orders/{id}
@@ -67,8 +77,8 @@ namespace Dash_DayTrip_API.Controllers
             return CreatedAtAction(nameof(GetOrder), new { id = order.OrderId }, order);
         }
 
-        // PUT: api/Orders/{id}
-        [HttpPut("{id}")]
+        // POST: api/Orders/{id}/update
+        [HttpPost("{id}/update")]
         public async Task<IActionResult> UpdateOrder(string id, [FromBody] Order order)
         {
             if (id != order.OrderId)
@@ -76,7 +86,6 @@ namespace Dash_DayTrip_API.Controllers
                 return BadRequest("ID mismatch");
             }
 
-            // 1. Fetch the EXISTING order from database (with packages)
             var existingOrder = await _context.Orders
                 .Include(o => o.OrderPackages)
                 .FirstOrDefaultAsync(o => o.OrderId == id);
@@ -86,28 +95,28 @@ namespace Dash_DayTrip_API.Controllers
                 return NotFound();
             }
 
-            // 2. Update parent order properties
             _context.Entry(existingOrder).CurrentValues.SetValues(order);
             existingOrder.UpdatedAt = DateTime.UtcNow;
 
-            // 3. Handle child packages ONLY if provided
             if (order.OrderPackages != null)
             {
                 existingOrder.OrderPackages ??= new List<OrderPackage>();
-
                 var newPackageIds = order.OrderPackages.Select(p => p.OrderPackageId).ToList();
 
-                // A. DELETE packages that were removed
+                // Soft-delete packages that were removed in the incoming list
                 var packagesToDelete = existingOrder.OrderPackages
                     .Where(p => !newPackageIds.Contains(p.OrderPackageId) && p.OrderPackageId != 0)
                     .ToList();
-
                 if (packagesToDelete.Any())
                 {
-                    _context.OrderPackages.RemoveRange(packagesToDelete);
+                    foreach (var pkg in packagesToDelete)
+                    {
+                        pkg.IsDeleted = true;
+                        pkg.UpdatedAt = DateTime.UtcNow;
+                    }
                 }
 
-                // B. ADD or UPDATE packages
+                // Add or update packages
                 foreach (var package in order.OrderPackages)
                 {
                     var existingPackage = existingOrder.OrderPackages
@@ -115,36 +124,31 @@ namespace Dash_DayTrip_API.Controllers
 
                     if (existingPackage != null)
                     {
-                        // UPDATE existing package
                         _context.Entry(existingPackage).CurrentValues.SetValues(package);
+                        existingPackage.UpdatedAt = DateTime.UtcNow;
                     }
                     else
                     {
-                        // INSERT new package
-                        package.OrderPackageId = 0; // Let DB generate new ID
+                        package.OrderPackageId = 0;
+                        package.IsDeleted = false;
+                        package.CreatedAt = DateTime.UtcNow;
                         existingOrder.OrderPackages.Add(package);
                     }
                 }
             }
 
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!OrderExists(id))
-                {
-                    return NotFound();
-                }
-                throw;
-            }
+            await _context.SaveChangesAsync();
 
-            return NoContent();
+            // Return updated order
+            var updatedOrder = await _context.Orders
+                .Include(o => o.OrderPackages)
+                .FirstOrDefaultAsync(o => o.OrderId == id);
+
+            return Ok(updatedOrder);
         }
 
-        // DELETE: api/Orders/{id}
-        [HttpDelete("{id}")]
+        // POST: api/Orders/{id}/delete
+        [HttpPost("{id}/delete")]
         public async Task<IActionResult> DeleteOrder(string id)
         {
             var order = await _context.Orders.FindAsync(id);
@@ -153,10 +157,12 @@ namespace Dash_DayTrip_API.Controllers
                 return NotFound();
             }
 
-            _context.Orders.Remove(order);
+            // Soft delete - set flag instead of removing the row
+            order.IsDeleted = true;
+            order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            return NoContent();
+            return Ok(new { message = "Order deleted", orderId = id });
         }
 
         // GET: api/Orders/statistics
@@ -207,8 +213,8 @@ namespace Dash_DayTrip_API.Controllers
                 .ToListAsync();
         }
 
-        // PATCH: api/Orders/{id}/status
-        [HttpPatch("{id}/status")]
+        // POST: api/Orders/{id}/status
+        [HttpPost("{id}/status")]
         public async Task<IActionResult> UpdateOrderStatus(string id, [FromBody] UpdateOrderStatusRequest request)
         {
             var order = await _context.Orders.FindAsync(id);
@@ -239,7 +245,6 @@ namespace Dash_DayTrip_API.Controllers
                 return BadRequest(new { message = "No file provided" });
             }
 
-            // Validate file type
             var allowedExtensions = new[] { ".jpg", ".jpeg", ".png", ".gif", ".pdf" };
             var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
             if (!allowedExtensions.Contains(extension))
@@ -249,20 +254,14 @@ namespace Dash_DayTrip_API.Controllers
 
             try
             {
-                // Get paths from configuration
                 var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DayTripImages";
                 var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://localhost:8081";
-                
                 var receiptFolder = Path.Combine(basePath, "Image", "Receipt");
-                
-                // Ensure directory exists
                 Directory.CreateDirectory(receiptFolder);
 
-                // Generate unique filename
                 var fileName = $"{id}_{DateTime.UtcNow:yyyyMMddHHmmss}{extension}";
                 var fullPath = Path.Combine(receiptFolder, fileName);
 
-                // Delete old receipt file if exists
                 if (!string.IsNullOrEmpty(order.PaymentReceipt))
                 {
                     var oldFileName = Path.GetFileName(new Uri(order.PaymentReceipt).LocalPath);
@@ -273,13 +272,11 @@ namespace Dash_DayTrip_API.Controllers
                     }
                 }
 
-                // Save file
                 using (var stream = new FileStream(fullPath, FileMode.Create))
                 {
                     await file.CopyToAsync(stream);
                 }
 
-                // Update database with URL
                 order.PaymentReceipt = $"{baseUrl}/Image/Receipt/{fileName}";
                 order.UpdatedAt = DateTime.UtcNow;
                 await _context.SaveChangesAsync();
@@ -298,8 +295,8 @@ namespace Dash_DayTrip_API.Controllers
             }
         }
 
-        // DELETE: api/Orders/{id}/receipt - Delete receipt image
-        [HttpDelete("{id}/receipt")]
+        // POST: api/Orders/{id}/receipt/delete - Delete receipt image
+        [HttpPost("{id}/receipt/delete")]
         public async Task<IActionResult> DeleteReceipt(string id)
         {
             var order = await _context.Orders.FindAsync(id);

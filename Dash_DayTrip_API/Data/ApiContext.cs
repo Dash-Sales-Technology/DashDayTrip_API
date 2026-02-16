@@ -64,6 +64,14 @@ namespace Dash_DayTrip_API.Data
 
             // Configure decimal precision for financial fields
             ConfigureDecimalPrecision(modelBuilder);
+
+            // Global query filters to automatically skip soft-deleted rows
+            modelBuilder.Entity<Order>().HasQueryFilter(o => !o.IsDeleted);
+            modelBuilder.Entity<Form>().HasQueryFilter(f => !f.IsDeleted);
+            modelBuilder.Entity<FormSettings>().HasQueryFilter(fs => !fs.IsDeleted);
+            modelBuilder.Entity<Package>().HasQueryFilter(p => !p.IsDeleted);
+            modelBuilder.Entity<Booking>().HasQueryFilter(b => !b.IsDeleted);
+            modelBuilder.Entity<OrderPackage>().HasQueryFilter(op => !op.IsDeleted);
         }
 
         private void ConfigureDecimalPrecision(ModelBuilder modelBuilder)

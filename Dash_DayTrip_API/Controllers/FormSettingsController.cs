@@ -31,11 +31,9 @@ namespace Dash_DayTrip_API.Controllers
             return settings;
         }
         
-        // POST: api/FormSettings
-        // PUT: api/FormSettings (Upsert)
-        [HttpPost]
-        [HttpPut]
-        public async Task<ActionResult<FormSettings>> UpsertFormSettings(FormSettings settings)
+        // POST: api/FormSettings/upsert
+        [HttpPost("upsert")]
+        public async Task<ActionResult<FormSettings>> UpsertFormSettings([FromBody] FormSettings settings)
         {
             var existing = await _context.FormSettings
                 .FirstOrDefaultAsync(fs => fs.FormId == settings.FormId);
@@ -46,6 +44,8 @@ namespace Dash_DayTrip_API.Controllers
                 settings.CreatedAt = DateTime.UtcNow;
                 settings.UpdatedAt = DateTime.UtcNow;
                 _context.FormSettings.Add(settings);
+                await _context.SaveChangesAsync();
+                return Ok(settings);
             }
             else
             {
@@ -59,29 +59,29 @@ namespace Dash_DayTrip_API.Controllers
                 existing.Currency = settings.Currency;
                 existing.NextDayCutoffTime = settings.NextDayCutoffTime;
                 existing.MaxGuestPerDay = settings.MaxGuestPerDay;
-
                 existing.UpdatedAt = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+                return Ok(existing);
             }
-            
-            await _context.SaveChangesAsync();
-            
-            return Ok(existing ?? settings);
         }
         
-        // DELETE: api/FormSettings/{id}
-        [HttpDelete("{id}")]
+        // POST: api/FormSettings/{id}/delete  -> soft-delete
+        [HttpPost("{id}/delete")]
         public async Task<IActionResult> DeleteFormSettings(int id)
         {
             var settings = await _context.FormSettings.FindAsync(id);
-            if (settings == null)
+            if (settings == null || settings.IsDeleted)
             {
                 return NotFound();
             }
             
-            _context.FormSettings.Remove(settings);
+            // Soft-delete: set flag instead of Remove
+            settings.IsDeleted = true;
+            settings.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             
-            return NoContent();
+            return Ok(new { message = "FormSettings soft-deleted", id });
         }
     }
 }

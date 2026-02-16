@@ -9,7 +9,7 @@ namespace Dash_DayTrip_API.Models
     {
         [Key]
         public int SettingId { get; set; }
-        
+
         [Required]
         public string FormId { get; set; } = string.Empty;
 
@@ -28,21 +28,23 @@ namespace Dash_DayTrip_API.Models
         // Fees & Invoicing Settings
         [MaxLength(20)]
         public string? DepositMode { get; set; } = "fixed"; // per_pax or fixed
-        
+
         [Column(TypeName = "decimal(10,2)")]
         public decimal? DepositAmount { get; set; } = 100.00m;
-        
+
         public bool SSTEnabled { get; set; }
-        
+
         [Column(TypeName = "decimal(5,2)")]
         public decimal? SSTPercentage { get; set; } = 8.00m;
-        
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
-        
+
         // Navigation property
         [ForeignKey("FormId")]
         [JsonIgnore]  // Added to break circular reference for Swagger
         public virtual Form? Form { get; set; }
+
+        public bool IsDeleted { get; set; }
     }
 }

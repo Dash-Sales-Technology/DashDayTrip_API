@@ -35,6 +35,7 @@ namespace Dash_DayTrip_API.Controllers
         {
             var query = _context.Bookings
                 .Include(b => b.Order)
+                .Where(b => !b.IsDeleted)
                 .AsQueryable();
 
             if (startDate.HasValue)
@@ -65,12 +66,28 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(bookings);
         }
 
-        // GET: api/Bookings/availability?date=2026-02-15
+        // GET: api/Bookings/{id}
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Booking>> GetBooking(int id)
+        {
+            var booking = await _context.Bookings
+                .Include(b => b.Order)
+                .FirstOrDefaultAsync(b => b.BookingId == id && !b.IsDeleted);
+
+            if (booking == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(booking);
+        }
+
+        // GET: api/Bookings/availability
         [HttpGet("availability")]
         public async Task<ActionResult<object>> GetAvailability([FromQuery] DateTime date)
         {
             var totalPax = await _context.Bookings
-                .Where(b => b.BookingDate == date.Date && b.Status == "confirmed")
+                .Where(b => b.BookingDate == date.Date && b.Status == "confirmed" && !b.IsDeleted)
                 .SumAsync(b => b.PaxCount);
 
             return Ok(new
@@ -82,14 +99,14 @@ namespace Dash_DayTrip_API.Controllers
             });
         }
 
-        // GET: api/Bookings/calendar?start=2026-02-01&end=2026-02-28
+        // GET: api/Bookings/calendar
         [HttpGet("calendar")]
         public async Task<ActionResult<IEnumerable<object>>> GetCalendarData(
             [FromQuery] DateTime start,
             [FromQuery] DateTime end)
         {
             var data = await _context.Bookings
-                .Where(b => b.BookingDate >= start.Date && b.BookingDate <= end.Date && b.Status == "confirmed")
+                .Where(b => b.BookingDate >= start.Date && b.BookingDate <= end.Date && b.Status == "confirmed" && !b.IsDeleted)
                 .GroupBy(b => b.BookingDate)
                 .Select(g => new
                 {
@@ -115,7 +132,7 @@ namespace Dash_DayTrip_API.Controllers
 
             // Check capacity
             var currentPax = await _context.Bookings
-                .Where(b => b.BookingDate == request.BookingDate.Date && b.Status == "confirmed")
+                .Where(b => b.BookingDate == request.BookingDate.Date && b.Status == "confirmed" && !b.IsDeleted)
                 .SumAsync(b => b.PaxCount);
 
             if (currentPax + request.PaxCount > MAX_PAX_PER_DATE)
@@ -135,29 +152,30 @@ namespace Dash_DayTrip_API.Controllers
                 BookingDate = request.BookingDate.Date,
                 PaxCount = request.PaxCount,
                 Status = request.Status,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                IsDeleted = false
             };
 
             _context.Bookings.Add(booking);
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetBookings), new { id = booking.BookingId }, booking);
+            return CreatedAtAction(nameof(GetBooking), new { id = booking.BookingId }, booking);
         }
 
-        // DELETE: api/Bookings/{id}
-        [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteBooking(int id)
+        // POST: api/Bookings/{id}/delete  -> soft-delete via POST
+        [HttpPost("{id}/delete")]
+        public async Task<IActionResult> DeleteBookingPost(int id)
         {
             var booking = await _context.Bookings.FindAsync(id);
-            if (booking == null)
+            if (booking == null || booking.IsDeleted)
             {
                 return NotFound();
             }
 
-            _context.Bookings.Remove(booking);
+            booking.IsDeleted = true;
             await _context.SaveChangesAsync();
 
-            return NoContent();
+            return Ok(new { message = "Booking soft-deleted", bookingId = id });
         }
     }
 }

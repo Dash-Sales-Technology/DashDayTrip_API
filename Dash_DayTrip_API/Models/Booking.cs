@@ -25,5 +25,7 @@ namespace Dash_DayTrip_API.Models
         // Navigation property
         [ForeignKey("OrderId")]
         public virtual Order? Order { get; set; }
+
+        public bool IsDeleted { get; set; }
     }
 }

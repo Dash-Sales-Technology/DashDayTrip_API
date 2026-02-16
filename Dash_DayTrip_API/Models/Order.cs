@@ -49,5 +49,7 @@ namespace Dash_DayTrip_API.Models
 
         // Navigation properties
         public virtual ICollection<OrderPackage>? OrderPackages { get; set; }
+
+        public bool IsDeleted { get; set; }
     }
 }
