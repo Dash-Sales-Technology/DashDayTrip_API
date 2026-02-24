@@ -10,9 +10,8 @@ namespace Dash_DayTrip_API.Data
         public DbSet<Package> Packages { get; set; }
         public DbSet<Order> Orders { get; set; }
         public DbSet<OrderPackage> OrderPackages { get; set; }
-
-        // ADD THIS - Missing DbSet for Bookings (calendar scheduling)
         public DbSet<Booking> Bookings { get; set; }
+        public DbSet<BookingGuest> BookingGuests { get; set; } = null!;
 
         public ApiContext(DbContextOptions<ApiContext> options)
             : base(options)
@@ -62,6 +61,13 @@ namespace Dash_DayTrip_API.Data
                 .HasForeignKey(b => b.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // BookingGuest configuration
+            modelBuilder.Entity<BookingGuest>()
+                .HasOne(bg => bg.Booking)
+                .WithMany()
+                .HasForeignKey(bg => bg.BookingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             // Configure decimal precision for financial fields
             ConfigureDecimalPrecision(modelBuilder);
 
@@ -72,6 +78,7 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<Package>().HasQueryFilter(p => !p.IsDeleted);
             modelBuilder.Entity<Booking>().HasQueryFilter(b => !b.IsDeleted);
             modelBuilder.Entity<OrderPackage>().HasQueryFilter(op => !op.IsDeleted);
+            modelBuilder.Entity<BookingGuest>().HasQueryFilter(bg => !bg.IsDeleted);
         }
 
         private void ConfigureDecimalPrecision(ModelBuilder modelBuilder)
