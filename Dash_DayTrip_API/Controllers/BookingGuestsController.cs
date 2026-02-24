@@ -39,7 +39,7 @@ namespace Dash_DayTrip_API.Controllers
             }
 
             var guests = await _context.BookingGuests
-                .Where(g => g.BookingId == bookingId)
+                .Where(g => g.BookingId == bookingId && !g.IsDeleted)
                 .OrderBy(g => g.GuestId)
                 .ToListAsync();
 
@@ -52,16 +52,12 @@ namespace Dash_DayTrip_API.Controllers
             int bookingId,
             [FromBody] List<CreateBookingGuestRequest> requests)
         {
-            var bookingExists = await _context.Bookings
-                .AnyAsync(b => b.BookingId == bookingId);
+            var booking = await _context.Bookings
+                .FirstOrDefaultAsync(b => b.BookingId == bookingId && !b.IsDeleted);
 
-            if (!bookingExists)
-            {
-                return BadRequest(new { message = "Invalid Booking ID." });
-            }
+            if (booking == null) return BadRequest(new { message = "Booking not found or deleted." });
 
             var guests = new List<BookingGuest>();
-
             foreach (var req in requests)
             {
                 var guest = new BookingGuest
@@ -74,10 +70,18 @@ namespace Dash_DayTrip_API.Controllers
                     CreatedAt = DateTime.UtcNow,
                     IsDeleted = false
                 };
-
                 _context.BookingGuests.Add(guest);
                 guests.Add(guest);
             }
+
+            // ⭐ STEP 1: Save the new guest records first
+            await _context.SaveChangesAsync();
+
+            // ⭐ STEP 2: RE-SYNC PAX COUNT
+            // We count the total number of guests currently in the DB for this booking
+            // This prevents "Double Counting" if the booking already had an initial PaxCount.
+            booking.PaxCount = await _context.BookingGuests
+                .CountAsync(g => g.BookingId == bookingId && !g.IsDeleted);
 
             await _context.SaveChangesAsync();
 
@@ -114,19 +118,31 @@ namespace Dash_DayTrip_API.Controllers
         public async Task<IActionResult> DeleteGuest(int guestId)
         {
             var guest = await _context.BookingGuests
-                .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(g => g.GuestId == guestId && !g.IsDeleted);
 
-            if (guest == null)
-            {
-                return NotFound(new { message = "Guest not found." });
-            }
+            if (guest == null) return NotFound();
 
+            var booking = await _context.Bookings.FindAsync(guest.BookingId);
+
+            // ⭐ STEP 1: Soft-delete the guest
             guest.IsDeleted = true;
             guest.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Guest soft-deleted", guestId });
+            // ⭐ STEP 2: RE-SYNC PAX COUNT
+            // After deletion, we recount the remaining active guests
+            if (booking != null)
+            {
+                booking.PaxCount = await _context.BookingGuests
+                    .CountAsync(g => g.BookingId == booking.BookingId && !g.IsDeleted);
+
+                // Optional: If you want to auto-delete empty bookings:
+                // if (booking.PaxCount == 0) booking.IsDeleted = true;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "Guest removed and pax count synced", bookingId = guest.BookingId });
         }
     }
 }

@@ -19,8 +19,9 @@ namespace Dash_DayTrip_API.Controllers
     {
         private readonly ApiContext _context;
         private readonly ILogger<BookingsController> _logger;
-        private const int MAX_PAX_PER_DATE = 3;
 
+        // HARDCODED CONSTANT
+        private const int MAX_PAX_PER_DATE = 20;
         public BookingsController(ApiContext context, ILogger<BookingsController> logger)
         {
             _context = context;
@@ -86,10 +87,10 @@ namespace Dash_DayTrip_API.Controllers
         [HttpGet("availability")]
         public async Task<ActionResult<object>> GetAvailability([FromQuery] DateTime date)
         {
+            // Use .Date to ensure we ignore time components
             var totalPax = await _context.Bookings
-                .Where(b => b.BookingDate == date.Date && b.Status == "confirmed" && !b.IsDeleted)
+                .Where(b => b.BookingDate.Date == date.Date && b.Status == "confirmed" && !b.IsDeleted)
                 .SumAsync(b => b.PaxCount);
-
             return Ok(new
             {
                 BookingDate = date.Date,
@@ -106,8 +107,8 @@ namespace Dash_DayTrip_API.Controllers
             [FromQuery] DateTime end)
         {
             var data = await _context.Bookings
-                .Where(b => b.BookingDate >= start.Date && b.BookingDate <= end.Date && b.Status == "confirmed" && !b.IsDeleted)
-                .GroupBy(b => b.BookingDate)
+                .Where(b => b.BookingDate.Date >= start.Date && b.BookingDate.Date <= end.Date && b.Status == "confirmed" && !b.IsDeleted)
+                .GroupBy(b => b.BookingDate.Date) // ⭐ Group by Date portion only
                 .Select(g => new
                 {
                     Date = g.Key,
@@ -115,7 +116,6 @@ namespace Dash_DayTrip_API.Controllers
                     BookingCount = g.Count()
                 })
                 .ToListAsync();
-
             return Ok(data);
         }
 
@@ -123,29 +123,19 @@ namespace Dash_DayTrip_API.Controllers
         [HttpPost]
         public async Task<ActionResult<Booking>> CreateBooking([FromBody] CreateBookingRequest request)
         {
-            // Validate order exists
-            var orderExists = await _context.Orders.AnyAsync(o => o.OrderId == request.OrderId);
-            if (!orderExists)
-            {
-                return BadRequest(new { message = "Invalid Order ID." });
-            }
-
-            // Check capacity
+            // Capacity check using the constant
             var currentPax = await _context.Bookings
-                .Where(b => b.BookingDate == request.BookingDate.Date && b.Status == "confirmed" && !b.IsDeleted)
+                .Where(b => b.BookingDate.Date == request.BookingDate.Date && b.Status == "confirmed" && !b.IsDeleted)
                 .SumAsync(b => b.PaxCount);
-
             if (currentPax + request.PaxCount > MAX_PAX_PER_DATE)
             {
                 return BadRequest(new
                 {
-                    message = $"Capacity exceeded for this date. Maximum {MAX_PAX_PER_DATE} pax allowed.",
+                    message = $"Capacity exceeded. Maximum {MAX_PAX_PER_DATE} pax allowed.",
                     currentPax,
-                    remainingCapacity = MAX_PAX_PER_DATE - currentPax,
-                    requestedPax = request.PaxCount
+                    remainingCapacity = MAX_PAX_PER_DATE - currentPax
                 });
             }
-
             var booking = new Booking
             {
                 OrderId = request.OrderId,
@@ -155,14 +145,12 @@ namespace Dash_DayTrip_API.Controllers
                 CreatedAt = DateTime.UtcNow,
                 IsDeleted = false
             };
-
             _context.Bookings.Add(booking);
             await _context.SaveChangesAsync();
-
-            return CreatedAtAction(nameof(GetBooking), new { id = booking.BookingId }, booking);
+            return Ok(booking);
         }
 
-        // POST: api/Bookings/{id}/delete  -> soft-delete via POST
+        // POST: api/Bookings/{id}/delete
         [HttpPost("{id}/delete")]
         public async Task<IActionResult> DeleteBookingPost(int id)
         {
