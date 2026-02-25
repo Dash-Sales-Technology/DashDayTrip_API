@@ -230,6 +230,37 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(new { OrderId = id, NewStatus = request.Status });
         }
 
+        // POST: api/Orders/{id}/invoice-sent
+        [HttpPost("{id}/invoice-sent")]
+        public async Task<IActionResult> MarkInvoiceSent(string id)
+        {
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null)
+            {
+                return NotFound();
+            }
+
+            order.InvoiceSentAt = DateTime.UtcNow;
+            order.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { OrderId = id, InvoiceSentAt = order.InvoiceSentAt });
+        }
+
+        // POST: api/Orders/{id}/invoice-reset
+        [HttpPost("{id}/invoice-reset")]
+        public async Task<IActionResult> ResetInvoiceStatus(string id)
+        {
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null) return NotFound();
+
+            order.InvoiceSentAt = null; // Clear the timestamp
+            order.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { OrderId = id, InvoiceSentAt = (DateTime?)null });
+        }
+
         // POST: api/Orders/{id}/receipt - Upload receipt image
         [HttpPost("{id}/receipt")]
         public async Task<IActionResult> UploadReceipt(string id, IFormFile file)

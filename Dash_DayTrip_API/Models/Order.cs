@@ -51,5 +51,8 @@ namespace Dash_DayTrip_API.Models
         public virtual ICollection<OrderPackage>? OrderPackages { get; set; }
 
         public bool IsDeleted { get; set; }
+
+        // Invoice tracking
+        public DateTime? InvoiceSentAt { get; set; }
     }
 }
