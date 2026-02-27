@@ -20,7 +20,7 @@ public class UploadsController : ControllerBase
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = 104857600)]
     [Consumes("multipart/form-data")]
-    public async Task<IActionResult> UploadImage(IFormFile file)
+    public async Task<IActionResult> UploadImage(IFormFile file, [FromForm(Name = "Directory")] string targetDir = null)
     {
         try
         {
@@ -36,10 +36,11 @@ public class UploadsController : ControllerBase
             }
 
             // Get paths from configuration
-            var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DayTripImages";
-            var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://localhost:8081";
+            var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DSTPos\DST_TenggolImage";
+            var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://tenggolimage.dstpos.com";
 
-            var folderPath = Path.Combine(basePath, "Image", "Receipt");
+            var uploadFolder = string.IsNullOrEmpty(targetDir) ? Path.Combine("Image", "Receipt") : targetDir.Replace("/", "\\");
+            var folderPath = Path.Combine(basePath, uploadFolder);
             _logger.LogInformation("Target folder: {FolderPath}", folderPath);
 
             if (!Directory.Exists(folderPath))
@@ -59,7 +60,8 @@ public class UploadsController : ControllerBase
             _logger.LogInformation("File saved successfully: {FilePath}", filePath);
 
             // Return full URL accessible via IIS image site
-            var url = $"{baseUrl}/Image/Receipt/{fileName}";
+            var urlDir = uploadFolder.Replace("\\", "/");
+            var url = $"{baseUrl}/{urlDir}/{fileName}";
             return Ok(new { url });
         }
         catch (Exception ex)
