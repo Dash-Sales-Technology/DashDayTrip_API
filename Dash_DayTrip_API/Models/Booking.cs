@@ -22,6 +22,9 @@ namespace Dash_DayTrip_API.Models
 
         public DateTime? CreatedAt { get; set; }
 
+        public decimal GratuityFee { get; set; }
+        public bool IsFirstBooking { get; set; }
+
         // Navigation property
         [ForeignKey("OrderId")]
         public virtual Order? Order { get; set; }

@@ -20,6 +20,9 @@ namespace Dash_DayTrip_API.Models
         [MaxLength(20)]
         public string IcNumber { get; set; } = string.Empty;
 
+        [MaxLength(50)]
+        public string? MobilePhone { get; set; }
+
         [MaxLength(20)]
         public string GuestType { get; set; } = "adult";
 

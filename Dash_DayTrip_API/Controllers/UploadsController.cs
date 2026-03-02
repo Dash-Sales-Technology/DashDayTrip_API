@@ -20,7 +20,7 @@ public class UploadsController : ControllerBase
     [DisableRequestSizeLimit]
     [RequestFormLimits(MultipartBodyLengthLimit = 104857600)]
     [Consumes("multipart/form-data")]
-    public async Task<IActionResult> UploadImage(IFormFile file, [FromForm(Name = "Directory")] string targetDir = null)
+    public async Task<IActionResult> UploadImage(IFormFile file, [FromForm(Name = "Directory")] string targetDir = null, [FromForm(Name = "FileName")] string customFileName = null)
     {
         try
         {
@@ -37,7 +37,7 @@ public class UploadsController : ControllerBase
 
             // Get paths from configuration
             var basePath = _configuration["ImageStorage:BasePath"] ?? @"C:\inetpub\wwwroot\DSTPos\DST_TenggolImage";
-            var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://tenggolimage.dstpos.com";
+            var baseUrl = _configuration["ImageStorage:BaseUrl"] ?? "http://tenggolimage.dstpos.com/";
 
             var uploadFolder = string.IsNullOrEmpty(targetDir) ? Path.Combine("Image", "Receipt") : targetDir.Replace("/", "\\");
             var folderPath = Path.Combine(basePath, uploadFolder);
@@ -49,7 +49,7 @@ public class UploadsController : ControllerBase
                 _logger.LogInformation("Created directory: {FolderPath}", folderPath);
             }
 
-            var fileName = $"{Guid.NewGuid()}{extension}";
+            var fileName = string.IsNullOrEmpty(customFileName) ? $"{Guid.NewGuid()}{extension}" : (customFileName.EndsWith(extension) ? customFileName : $"{customFileName}{extension}");
             var filePath = Path.Combine(folderPath, fileName);
 
             using (var stream = new FileStream(filePath, FileMode.Create))

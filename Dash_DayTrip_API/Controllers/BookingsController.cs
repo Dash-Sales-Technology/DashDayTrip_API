@@ -59,6 +59,8 @@ namespace Dash_DayTrip_API.Controllers
                     b.PaxCount,
                     b.Status,
                     b.CreatedAt,
+                    b.GratuityFee,
+                    b.IsFirstBooking,
                     CustomerName = b.Order != null ? b.Order.CustomerName : null,
                     ReferenceNumber = b.Order != null ? b.Order.ReferenceNumber : null
                 })
@@ -136,6 +138,10 @@ namespace Dash_DayTrip_API.Controllers
                     remainingCapacity = MAX_PAX_PER_DATE - currentPax
                 });
             }
+            // Check if this is the first booking for this order
+            bool hasExistingBookings = await _context.Bookings
+                .AnyAsync(b => b.OrderId == request.OrderId && !b.IsDeleted);
+
             var booking = new Booking
             {
                 OrderId = request.OrderId,
@@ -143,7 +149,9 @@ namespace Dash_DayTrip_API.Controllers
                 PaxCount = request.PaxCount,
                 Status = request.Status,
                 CreatedAt = DateTime.UtcNow,
-                IsDeleted = false
+                IsDeleted = false,
+                GratuityFee = request.PaxCount * 5.0m, // Calculate RM5 per pax
+                IsFirstBooking = !hasExistingBookings
             };
             _context.Bookings.Add(booking);
             await _context.SaveChangesAsync();

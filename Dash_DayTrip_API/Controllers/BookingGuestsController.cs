@@ -9,6 +9,7 @@ namespace Dash_DayTrip_API.Controllers
     {
         public string FullName { get; set; } = string.Empty;
         public string IcNumber { get; set; } = string.Empty;
+        public string? MobilePhone { get; set; }
         public string? GuestType { get; set; } = "adult";
         public string? Notes { get; set; }
     }
@@ -65,6 +66,7 @@ namespace Dash_DayTrip_API.Controllers
                     BookingId = bookingId,
                     FullName = req.FullName,
                     IcNumber = req.IcNumber,
+                    MobilePhone = req.MobilePhone,
                     GuestType = req.GuestType ?? "adult",
                     Notes = req.Notes,
                     CreatedAt = DateTime.UtcNow,
@@ -82,6 +84,9 @@ namespace Dash_DayTrip_API.Controllers
             // This prevents "Double Counting" if the booking already had an initial PaxCount.
             booking.PaxCount = await _context.BookingGuests
                 .CountAsync(g => g.BookingId == bookingId && !g.IsDeleted);
+
+            // ⭐ STEP 3: RECALCULATE GRATUITY
+            booking.GratuityFee = booking.PaxCount * 5.0m;
 
             await _context.SaveChangesAsync();
 
@@ -104,6 +109,7 @@ namespace Dash_DayTrip_API.Controllers
 
             guest.FullName = request.FullName;
             guest.IcNumber = request.IcNumber;
+            guest.MobilePhone = request.MobilePhone;
             guest.GuestType = request.GuestType ?? guest.GuestType;
             guest.Notes = request.Notes;
             guest.UpdatedAt = DateTime.UtcNow;
@@ -135,6 +141,9 @@ namespace Dash_DayTrip_API.Controllers
             {
                 booking.PaxCount = await _context.BookingGuests
                     .CountAsync(g => g.BookingId == booking.BookingId && !g.IsDeleted);
+
+                // ⭐ STEP 3: RECALCULATE GRATUITY
+                booking.GratuityFee = booking.PaxCount * 5.0m;
 
                 // Optional: If you want to auto-delete empty bookings:
                 // if (booking.PaxCount == 0) booking.IsDeleted = true;
