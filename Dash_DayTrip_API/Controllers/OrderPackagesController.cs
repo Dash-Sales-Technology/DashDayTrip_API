@@ -7,8 +7,8 @@ namespace Dash_DayTrip_API.Controllers
 {
     public class CreateOrderPackageRequest
     {
-        public string OrderId { get; set; } = string.Empty;
-        public string PackageId { get; set; } = string.Empty;
+        public int OrderId { get; set; }
+        public int PackageId { get; set; }
         public string PackageName { get; set; } = string.Empty;
         public int Quantity { get; set; } = 1;
         public decimal UnitPrice { get; set; }
@@ -78,7 +78,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // GET: api/OrderPackages/ByOrder/{orderId}
         [HttpGet("ByOrder/{orderId}")]
-        public async Task<ActionResult<IEnumerable<OrderPackage>>> GetOrderPackagesByOrder(string orderId)
+        public async Task<ActionResult<IEnumerable<OrderPackage>>> GetOrderPackagesByOrder(int orderId)
         {
             var orderPackages = await _context.OrderPackages
                 .Where(op => op.OrderId == orderId && !op.IsDeleted)
@@ -162,7 +162,7 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(orderPackage);
         }
 
-        // POST: api/OrderPackages/{id}/delete  -> soft-delete via POST
+        // POST: api/OrderPackages/{id}/delete
         [HttpPost("{id}/delete")]
         public async Task<IActionResult> DeleteOrderPackagePost(int id)
         {

@@ -1,4 +1,4 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Dash_DayTrip_API.Models
@@ -10,7 +10,7 @@ namespace Dash_DayTrip_API.Models
         public int BookingId { get; set; }
 
         [Required]
-        public string OrderId { get; set; } = string.Empty;
+        public int OrderId { get; set; }
 
         [Required]
         public DateTime BookingDate { get; set; }

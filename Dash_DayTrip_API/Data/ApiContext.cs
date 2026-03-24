@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Dash_DayTrip_API.Models;
 
 namespace Dash_DayTrip_API.Data
@@ -12,6 +12,8 @@ namespace Dash_DayTrip_API.Data
         public DbSet<OrderPackage> OrderPackages { get; set; }
         public DbSet<Booking> Bookings { get; set; }
         public DbSet<BookingGuest> BookingGuests { get; set; } = null!;
+        public DbSet<Promotion> Promotions { get; set; }
+        public DbSet<User> Users { get; set; }
 
         public ApiContext(DbContextOptions<ApiContext> options)
             : base(options)
@@ -71,6 +73,13 @@ namespace Dash_DayTrip_API.Data
             // Configure decimal precision for financial fields
             ConfigureDecimalPrecision(modelBuilder);
 
+            // Promotion configuration
+            modelBuilder.Entity<Order>()
+                .HasOne(o => o.Promotion)
+                .WithOne(p => p.Order)
+                .HasForeignKey<Promotion>(p => p.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             // Global query filters to automatically skip soft-deleted rows
             modelBuilder.Entity<Order>().HasQueryFilter(o => !o.IsDeleted);
             modelBuilder.Entity<Form>().HasQueryFilter(f => !f.IsDeleted);
@@ -79,6 +88,8 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<Booking>().HasQueryFilter(b => !b.IsDeleted);
             modelBuilder.Entity<OrderPackage>().HasQueryFilter(op => !op.IsDeleted);
             modelBuilder.Entity<BookingGuest>().HasQueryFilter(bg => !bg.IsDeleted);
+            modelBuilder.Entity<Promotion>().HasQueryFilter(p => !p.IsDeleted);
+            modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
         }
 
         private void ConfigureDecimalPrecision(ModelBuilder modelBuilder)
@@ -111,7 +122,7 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<Order>()
                 .Property(o => o.BalanceDue).HasColumnType("decimal(10,2)");
 
-            // OrderPackage decimals (was BookingPackage)
+            // OrderPackage decimals 
             modelBuilder.Entity<OrderPackage>()
                 .Property(op => op.UnitPrice).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<OrderPackage>()
@@ -120,6 +131,10 @@ namespace Dash_DayTrip_API.Data
                 .Property(op => op.BoatFareAmount).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<OrderPackage>()
                 .Property(op => op.GratuityAmount).HasColumnType("decimal(10,2)");
+
+            //Promotion decimals
+            modelBuilder.Entity<Promotion>()
+                .Property(p => p.DiscountValue).HasColumnType("decimal(10,2)");
         }
     }
 }

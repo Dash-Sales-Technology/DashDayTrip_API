@@ -16,17 +16,17 @@ namespace Dash_DayTrip_API.Controllers
             _context = context;
         }
 
-        // GET: api/Packages or api/Packages?formId=xxx
+        // GET: api/Packages or api/Packages?formId=1
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Package>>> GetPackages([FromQuery] string? formId)
+        public async Task<ActionResult<IEnumerable<Package>>> GetPackages([FromQuery] int? formId)
         {
             var query = _context.Packages
                 .Where(p => !p.IsDeleted)
                 .AsQueryable();
 
-            if (!string.IsNullOrEmpty(formId))
+            if (formId.HasValue)
             {
-                query = query.Where(p => p.FormId == formId);
+                query = query.Where(p => p.FormId == formId.Value);
             }
 
             return await query.OrderBy(p => p.CreatedAt).ToListAsync();
@@ -34,7 +34,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // GET: api/Packages/{id}
         [HttpGet("{id}")]
-        public async Task<ActionResult<Package>> GetPackage(string id)
+        public async Task<ActionResult<Package>> GetPackage(int id)
         {
             var package = await _context.Packages
                 .FirstOrDefaultAsync(p => p.PackageId == id && !p.IsDeleted);
@@ -49,7 +49,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // GET: api/Packages/form/{formId}
         [HttpGet("form/{formId}")]
-        public async Task<ActionResult<IEnumerable<Package>>> GetPackagesByForm(string formId)
+        public async Task<ActionResult<IEnumerable<Package>>> GetPackagesByForm(int formId)
         {
             return await _context.Packages
                 .Where(p => p.FormId == formId && !p.IsDeleted)
@@ -61,11 +61,7 @@ namespace Dash_DayTrip_API.Controllers
         [HttpPost]
         public async Task<ActionResult<Package>> CreatePackage(Package package)
         {
-            if (string.IsNullOrEmpty(package.PackageId))
-            {
-                package.PackageId = Guid.NewGuid().ToString();
-            }
-
+            // PackageId is IDENTITY — SQL Server generates it automatically
             package.CreatedAt = DateTime.UtcNow;
             package.UpdatedAt = DateTime.UtcNow;
             package.IsDeleted = false;
@@ -76,9 +72,9 @@ namespace Dash_DayTrip_API.Controllers
             return CreatedAtAction(nameof(GetPackage), new { id = package.PackageId }, package);
         }
 
-        // POST: api/Packages/{id}/update  -> replace PUT with POST-based update
+        // POST: api/Packages/{id}/update
         [HttpPost("{id}/update")]
-        public async Task<IActionResult> UpdatePackagePost(string id, [FromBody] Package package)
+        public async Task<IActionResult> UpdatePackagePost(int id, [FromBody] Package package)
         {
             if (id != package.PackageId)
             {
@@ -116,7 +112,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // POST: api/Packages/{id}/delete
         [HttpPost("{id}/delete")]
-        public async Task<IActionResult> DeletePackagePost(string id)
+        public async Task<IActionResult> DeletePackagePost(int id)
         {
             var package = await _context.Packages.FindAsync(id);
             if (package == null || package.IsDeleted)
@@ -131,7 +127,7 @@ namespace Dash_DayTrip_API.Controllers
             return NoContent();
         }
 
-        private bool PackageExists(string id)
+        private bool PackageExists(int id)
         {
             return _context.Packages.Any(p => p.PackageId == id && !p.IsDeleted);
         }

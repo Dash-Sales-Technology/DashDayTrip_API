@@ -18,7 +18,7 @@ namespace Dash_DayTrip_API.Controllers
         
         // GET: api/FormSettings/form/{formId}
         [HttpGet("form/{formId}")]
-        public async Task<ActionResult<FormSettings>> GetFormSettings(string formId)
+        public async Task<ActionResult<FormSettings>> GetFormSettings(int formId)
         {
             var settings = await _context.FormSettings
                 .FirstOrDefaultAsync(fs => fs.FormId == formId);

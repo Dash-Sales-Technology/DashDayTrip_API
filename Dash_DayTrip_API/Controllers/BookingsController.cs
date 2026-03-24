@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Dash_DayTrip_API.Models;
 using Dash_DayTrip_API.Data;
@@ -7,7 +7,7 @@ namespace Dash_DayTrip_API.Controllers
 {
     public class CreateBookingRequest
     {
-        public string OrderId { get; set; } = string.Empty;
+        public int OrderId { get; set; }
         public DateTime BookingDate { get; set; }
         public int PaxCount { get; set; }
         public string Status { get; set; } = "confirmed";

@@ -8,10 +8,11 @@ namespace Dash_DayTrip_API.Models
     public class Package
     {
         [Key]
-        public string PackageId { get; set; } = string.Empty;
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int PackageId { get; set; }
 
         [Required]
-        public string FormId { get; set; } = string.Empty;
+        public int FormId { get; set; }
 
         [Required]
         public string MerchantId { get; set; } = string.Empty;
@@ -46,7 +47,7 @@ namespace Dash_DayTrip_API.Models
         [MaxLength(20)]
         public string? GratuityCalcType { get; set; } // per_pax or per_unit
 
-        // Deposit Configuration 
+        // Deposit Configuration
         [Column(TypeName = "decimal(10,2)")]
         public decimal? DepositAmount { get; set; }
 

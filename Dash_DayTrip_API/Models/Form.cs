@@ -8,7 +8,8 @@ namespace Dash_DayTrip_API.Models
     public class Form
     {
         [Key]
-        public string FormId { get; set; } = string.Empty;
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int FormId { get; set; }
 
         [Required]
         [MaxLength(200)]

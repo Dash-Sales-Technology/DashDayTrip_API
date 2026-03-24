@@ -11,6 +11,17 @@ namespace Dash_DayTrip_API.Controllers
     {
         public string Status { get; set; } = string.Empty;
     }
+    public class UpdatePaymentStatusRequest
+    {
+        public string PaymentStatus { get; set; } = string.Empty;
+    }
+
+    public class BulkUpdatePaymentStatusRequest
+    {
+        public List<int> OrderIds { get; set; } = new();
+        public string PaymentStatus { get; set; } = string.Empty;
+    }
+
 
     [Route("api/[controller]")]
     [ApiController]
@@ -35,13 +46,13 @@ namespace Dash_DayTrip_API.Controllers
             {
                 var orders = await _context.Orders
                     .Include(o => o.OrderPackages)
+                    .Include(o => o.Promotion)
                     .ToListAsync();
 
                 return Ok(orders);
             }
             catch (Exception ex)
             {
-                // Log the exception and return details for debugging (remove stack in production)
                 _logger.LogError(ex, "GetOrders failed");
                 return StatusCode(500, new { error = ex.Message, stack = ex.StackTrace });
             }
@@ -49,10 +60,11 @@ namespace Dash_DayTrip_API.Controllers
 
         // GET: api/Orders/{id}
         [HttpGet("{id}")]
-        public async Task<ActionResult<Order>> GetOrder(string id)
+        public async Task<ActionResult<Order>> GetOrder(int id)
         {
             var order = await _context.Orders
                 .Include(o => o.OrderPackages)
+                .Include(o => o.Promotion)
                 .FirstOrDefaultAsync(o => o.OrderId == id);
 
             if (order == null)
@@ -67,19 +79,23 @@ namespace Dash_DayTrip_API.Controllers
         [HttpPost]
         public async Task<ActionResult<Order>> CreateOrder([FromBody] Order order)
         {
-            order.OrderId = Guid.NewGuid().ToString();
             order.CreatedAt = DateTime.UtcNow;
             order.UpdatedAt = DateTime.UtcNow;
-
+            // EF will automatically handle the nested order.Promotion object 
+            // and associate it with the newly created OrderId.
+            if (order.Promotion != null)
+            {
+                order.Promotion.CreatedAt = DateTime.UtcNow;
+                order.Promotion.UpdatedAt = DateTime.UtcNow;
+            }
             _context.Orders.Add(order);
             await _context.SaveChangesAsync();
-
             return CreatedAtAction(nameof(GetOrder), new { id = order.OrderId }, order);
         }
 
         // POST: api/Orders/{id}/update
         [HttpPost("{id}/update")]
-        public async Task<IActionResult> UpdateOrder(string id, [FromBody] Order order)
+        public async Task<IActionResult> UpdateOrder(int id, [FromBody] Order order)
         {
             if (id != order.OrderId)
             {
@@ -88,6 +104,7 @@ namespace Dash_DayTrip_API.Controllers
 
             var existingOrder = await _context.Orders
                 .Include(o => o.OrderPackages)
+                .Include(o => o.Promotion) // Essential for detection
                 .FirstOrDefaultAsync(o => o.OrderId == id);
 
             if (existingOrder == null)
@@ -95,28 +112,46 @@ namespace Dash_DayTrip_API.Controllers
                 return NotFound();
             }
 
+            // Update main order fields
             _context.Entry(existingOrder).CurrentValues.SetValues(order);
             existingOrder.UpdatedAt = DateTime.UtcNow;
 
+            // --- PROMOTION UPDATE LOGIC ---
+            if (order.Promotion != null)
+            {
+                if (existingOrder.Promotion != null)
+                {
+                    // Update existing promotion record
+                    _context.Entry(existingOrder.Promotion).CurrentValues.SetValues(order.Promotion);
+                    existingOrder.Promotion.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    // Create new promotion record for this order
+                    order.Promotion.OrderId = id;
+                    order.Promotion.CreatedAt = DateTime.UtcNow;
+                    order.Promotion.UpdatedAt = DateTime.UtcNow;
+                    existingOrder.Promotion = order.Promotion;
+                }
+            }
+            // ----------------------------
+
+            // Package update logic (Keep as is)
             if (order.OrderPackages != null)
             {
                 existingOrder.OrderPackages ??= new List<OrderPackage>();
                 var newPackageIds = order.OrderPackages.Select(p => p.OrderPackageId).ToList();
 
-                // Soft-delete packages that were removed in the incoming list
                 var packagesToDelete = existingOrder.OrderPackages
                     .Where(p => !newPackageIds.Contains(p.OrderPackageId) && p.OrderPackageId != 0)
                     .ToList();
-                if (packagesToDelete.Any())
+
+                foreach (var pkg in packagesToDelete)
                 {
-                    foreach (var pkg in packagesToDelete)
-                    {
-                        pkg.IsDeleted = true;
-                        pkg.UpdatedAt = DateTime.UtcNow;
-                    }
+                    pkg.IsDeleted = true;
+                    pkg.UpdatedAt = DateTime.UtcNow;
                 }
 
-                // Add or update packages
                 foreach (var package in order.OrderPackages)
                 {
                     var existingPackage = existingOrder.OrderPackages
@@ -139,17 +174,19 @@ namespace Dash_DayTrip_API.Controllers
 
             await _context.SaveChangesAsync();
 
-            // Return updated order
+            // Re-fetch everything to ensure frontend gets the latest saved data
             var updatedOrder = await _context.Orders
                 .Include(o => o.OrderPackages)
+                .Include(o => o.Promotion) // Crucial to include here too!
                 .FirstOrDefaultAsync(o => o.OrderId == id);
 
             return Ok(updatedOrder);
         }
 
+
         // POST: api/Orders/{id}/delete
         [HttpPost("{id}/delete")]
-        public async Task<IActionResult> DeleteOrder(string id)
+        public async Task<IActionResult> DeleteOrder(int id)
         {
             var order = await _context.Orders.FindAsync(id);
             if (order == null)
@@ -157,7 +194,6 @@ namespace Dash_DayTrip_API.Controllers
                 return NotFound();
             }
 
-            // Soft delete - set flag instead of removing the row
             order.IsDeleted = true;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -168,14 +204,14 @@ namespace Dash_DayTrip_API.Controllers
         // GET: api/Orders/statistics
         [HttpGet("statistics")]
         public async Task<ActionResult<OrderStatistics>> GetStatistics(
-            [FromQuery] string? formId = null,
+            [FromQuery] int? formId = null,
             [FromQuery] string? merchantId = null)
         {
             var query = _context.Orders.AsQueryable();
 
-            if (!string.IsNullOrEmpty(formId))
+            if (formId.HasValue)
             {
-                query = query.Where(o => o.FormId == formId);
+                query = query.Where(o => o.FormId == formId.Value);
             }
 
             if (!string.IsNullOrEmpty(merchantId))
@@ -190,13 +226,12 @@ namespace Dash_DayTrip_API.Controllers
                 TotalOrders = await query.CountAsync(),
                 TotalRevenue = await query.SumAsync(o => o.GrandTotal),
                 TotalDeposits = await query.SumAsync(o => o.DepositPaid),
-                OutstandingBalance = await query.SumAsync(o => o.BalanceDue),
-                TodayOrders = await query.CountAsync(o => o.CreatedAt.Date == today),
-                TodayRevenue = await query.Where(o => o.CreatedAt.Date == today).SumAsync(o => o.GrandTotal),
-                PendingCount = await query.CountAsync(o => o.Status == "pending"),
-                ConfirmedCount = await query.CountAsync(o => o.Status == "confirmed"),
-                CompletedCount = await query.CountAsync(o => o.Status == "completed"),
-                CancelledCount = await query.CountAsync(o => o.Status == "cancelled")
+                TotalBalance = await query.SumAsync(o => o.BalanceDue),
+                AverageOrderValue = await query.AnyAsync() ? await query.AverageAsync(o => o.GrandTotal) : 0,
+                DailySales = await query.Where(o => o.CreatedAt.Date == today).SumAsync(o => o.GrandTotal),
+                ConfirmedOrders = await query.CountAsync(o => o.Status == "confirmed"),
+                PendingOrders = await query.CountAsync(o => o.Status == "pending"),
+                CancelledOrders = await query.CountAsync(o => o.Status == "cancelled")
             };
 
             return stats;
@@ -204,18 +239,19 @@ namespace Dash_DayTrip_API.Controllers
 
         // GET: api/Orders/form/{formId}
         [HttpGet("form/{formId}")]
-        public async Task<ActionResult<IEnumerable<Order>>> GetOrdersByForm(string formId)
+        public async Task<ActionResult<IEnumerable<Order>>> GetOrdersByForm(int formId)
         {
             return await _context.Orders
                 .Where(o => o.FormId == formId)
                 .Include(o => o.OrderPackages)
+                .Include(o => o.Promotion)
                 .OrderByDescending(o => o.CreatedAt)
                 .ToListAsync();
         }
 
         // POST: api/Orders/{id}/status
         [HttpPost("{id}/status")]
-        public async Task<IActionResult> UpdateOrderStatus(string id, [FromBody] UpdateOrderStatusRequest request)
+        public async Task<IActionResult> UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusRequest request)
         {
             var order = await _context.Orders.FindAsync(id);
             if (order == null)
@@ -232,7 +268,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // POST: api/Orders/{id}/invoice-sent
         [HttpPost("{id}/invoice-sent")]
-        public async Task<IActionResult> MarkInvoiceSent(string id)
+        public async Task<IActionResult> MarkInvoiceSent(int id)
         {
             var order = await _context.Orders.FindAsync(id);
             if (order == null)
@@ -249,21 +285,21 @@ namespace Dash_DayTrip_API.Controllers
 
         // POST: api/Orders/{id}/invoice-reset
         [HttpPost("{id}/invoice-reset")]
-        public async Task<IActionResult> ResetInvoiceStatus(string id)
+        public async Task<IActionResult> ResetInvoiceStatus(int id)
         {
             var order = await _context.Orders.FindAsync(id);
             if (order == null) return NotFound();
 
-            order.InvoiceSentAt = null; // Clear the timestamp
+            order.InvoiceSentAt = null;
             order.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
             return Ok(new { OrderId = id, InvoiceSentAt = (DateTime?)null });
         }
 
-        // POST: api/Orders/{id}/receipt - Upload receipt image
+        // POST: api/Orders/{id}/receipt
         [HttpPost("{id}/receipt")]
-        public async Task<IActionResult> UploadReceipt(string id, IFormFile file)
+        public async Task<IActionResult> UploadReceipt(int id, IFormFile file)
         {
             var order = await _context.Orders.FindAsync(id);
             if (order == null)
@@ -314,9 +350,9 @@ namespace Dash_DayTrip_API.Controllers
 
                 _logger.LogInformation("Receipt uploaded for order {OrderId}: {Url}", id, order.PaymentReceipt);
 
-                return Ok(new { 
+                return Ok(new {
                     message = "Receipt uploaded successfully",
-                    imageUrl = order.PaymentReceipt 
+                    imageUrl = order.PaymentReceipt
                 });
             }
             catch (Exception ex)
@@ -326,9 +362,9 @@ namespace Dash_DayTrip_API.Controllers
             }
         }
 
-        // POST: api/Orders/{id}/receipt/delete - Delete receipt image
+        // POST: api/Orders/{id}/receipt/delete
         [HttpPost("{id}/receipt/delete")]
-        public async Task<IActionResult> DeleteReceipt(string id)
+        public async Task<IActionResult> DeleteReceipt(int id)
         {
             var order = await _context.Orders.FindAsync(id);
             if (order == null)
@@ -365,7 +401,90 @@ namespace Dash_DayTrip_API.Controllers
             }
         }
 
-        private bool OrderExists(string id)
+        // GET: api/Orders/expiring-invoices?daysOld=3
+        [HttpGet("expiring-invoices")]
+        public async Task<ActionResult<IEnumerable<object>>> GetExpiringInvoices([FromQuery] int daysOld = 3)
+        {
+            try
+            {
+                var cutoffDate = DateTime.UtcNow.AddDays(-daysOld);
+
+                var expiring = await _context.Orders
+                    .Where(o => (o.PaymentStatus == "Pending" || o.PaymentStatus == "Partial")
+                             && o.InvoiceSentAt != null
+                             && o.InvoiceSentAt <= cutoffDate)
+                    .OrderBy(o => o.InvoiceSentAt)
+                    .Select(o => new
+                    {
+                        o.OrderId,
+                        o.ReferenceNumber,
+                        o.CustomerName,
+                        o.Phone,
+                        o.CountryCode,
+                        o.Email,
+                        o.InvoiceSentAt,
+                        o.GrandTotal,
+                        o.BalanceDue,
+                        o.PaymentStatus
+                    })
+                    .ToListAsync();
+
+                return Ok(expiring);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "GetExpiringInvoices failed");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        // POST: api/Orders/{id}/payment-status
+        [HttpPost("{id}/payment-status")]
+        public async Task<IActionResult> UpdatePaymentStatus(int id, [FromBody] UpdatePaymentStatusRequest request)
+        {
+            var order = await _context.Orders.FindAsync(id);
+            if (order == null) return NotFound();
+
+            order.PaymentStatus = request.PaymentStatus;
+            order.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+
+            return Ok(new { OrderId = id, NewPaymentStatus = request.PaymentStatus });
+        }
+
+        // POST: api/Orders/bulk-payment-status
+        [HttpPost("bulk-payment-status")]
+        public async Task<ActionResult<OrderPaymentStatusUpdateResponse>> BulkUpdatePaymentStatus([FromBody] BulkUpdatePaymentStatusRequest request)
+        {
+            if (request.OrderIds == null || !request.OrderIds.Any())
+            {
+                return BadRequest(new ApiResponse { Success = false, Message = "No order IDs provided" });
+            }
+
+            var orders = await _context.Orders
+                .Where(o => request.OrderIds.Contains(o.OrderId))
+                .ToListAsync();
+
+            foreach (var order in orders)
+            {
+                order.PaymentStatus = request.PaymentStatus;
+                order.UpdatedAt = DateTime.UtcNow;
+            }
+
+            await _context.SaveChangesAsync();
+
+            return Ok(new OrderPaymentStatusUpdateResponse
+            {
+                Success = true,
+                Message = $"Successfully updated {orders.Count} orders",
+                OrderIds = orders.Select(o => o.OrderId).ToList(),
+                NewPaymentStatus = request.PaymentStatus,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+
+        private bool OrderExists(int id)
         {
             return _context.Orders.Any(o => o.OrderId == id);
         }

@@ -11,7 +11,7 @@ namespace Dash_DayTrip_API.Models
         public int SettingId { get; set; }
 
         [Required]
-        public string FormId { get; set; } = string.Empty;
+        public int FormId { get; set; }
 
         // Staff Settings (stored as JSON)
         public string? SalesExecutives { get; set; }

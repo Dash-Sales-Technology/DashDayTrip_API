@@ -5,7 +5,7 @@ namespace Dash_DayTrip_API.Models.DTOs
     /// </summary>
     public class FormDto
     {
-        public string FormId { get; set; } = string.Empty;
+        public int FormId { get; set; }
         public string Title { get; set; } = string.Empty;
         public string Status { get; set; } = "draft";
         public bool IsDefault { get; set; }
@@ -27,7 +27,7 @@ namespace Dash_DayTrip_API.Models.DTOs
     public class FormSettingsDto
     {
         public int SettingId { get; set; }
-        public string FormId { get; set; } = string.Empty;
+        public int FormId { get; set; }
         public string? SalesExecutives { get; set; }
         public string? TaxIdNumber { get; set; }
         public string? Currency { get; set; }

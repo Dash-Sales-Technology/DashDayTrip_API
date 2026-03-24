@@ -40,9 +40,39 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(forms.Select(ToDto));
         }
 
+        // GET: api/Forms/default
+        [HttpGet("default")]
+        public async Task<ActionResult<FormDto>> GetDefaultForm()
+        {
+            var form = await _context.Forms
+                .Include(f => f.FormSettings)
+                .Include(f => f.Packages)
+                .Where(f => f.IsDefault && !f.IsDeleted)
+                .FirstOrDefaultAsync();
+
+            if (form == null)
+            {
+                // Fallback: return the most recently created active form
+                form = await _context.Forms
+                    .Include(f => f.FormSettings)
+                    .Include(f => f.Packages)
+                    .Where(f => !f.IsDeleted)
+                    .OrderByDescending(f => f.CreatedAt)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (form == null)
+            {
+                return NotFound(new { message = "No default form found." });
+            }
+
+            return Ok(ToDto(form));
+        }
+
         // GET: api/Forms/{id}
-        [HttpGet("{id}")]
-        public async Task<ActionResult<FormDto>> GetForm(string id)
+        [HttpGet("{id:int}")]
+        public async Task<ActionResult<FormDto>> GetForm(int id)
+
         {
             var form = await _context.Forms
                 .Include(f => f.FormSettings)
@@ -61,11 +91,7 @@ namespace Dash_DayTrip_API.Controllers
         [HttpPost]
         public async Task<ActionResult<FormDto>> CreateForm(Form form)
         {
-            if (string.IsNullOrEmpty(form.FormId))
-            {
-                form.FormId = Guid.NewGuid().ToString();
-            }
-
+            // FormId is IDENTITY — SQL Server generates it automatically
             form.CreatedAt = DateTime.UtcNow;
             form.UpdatedAt = DateTime.UtcNow;
 
@@ -77,7 +103,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // POST: api/Forms/{id}/update
         [HttpPost("{id}/update")]
-        public async Task<IActionResult> UpdateForm(string id, Form form)
+        public async Task<IActionResult> UpdateForm(int id, Form form)
         {
             if (id != form.FormId)
             {
@@ -90,7 +116,6 @@ namespace Dash_DayTrip_API.Controllers
                 return NotFound();
             }
 
-            // Update only the fields that should change
             existingForm.Title = form.Title;
             existingForm.Status = form.Status;
             existingForm.IsDefault = form.IsDefault;
@@ -102,7 +127,6 @@ namespace Dash_DayTrip_API.Controllers
 
             await _context.SaveChangesAsync();
 
-            // Return updated data
             var updatedForm = await _context.Forms
                 .Include(f => f.FormSettings)
                 .FirstOrDefaultAsync(f => f.FormId == id);
@@ -112,7 +136,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // POST: api/Forms/{id}/status
         [HttpPost("{id}/status")]
-        public async Task<IActionResult> UpdateFormStatus(string id, [FromBody] UpdateStatusRequest request)
+        public async Task<IActionResult> UpdateFormStatus(int id, [FromBody] UpdateStatusRequest request)
         {
             var form = await _context.Forms.FindAsync(id);
             if (form == null)
@@ -129,7 +153,7 @@ namespace Dash_DayTrip_API.Controllers
 
         // POST: api/Forms/{id}/delete
         [HttpPost("{id}/delete")]
-        public async Task<IActionResult> DeleteForm(string id)
+        public async Task<IActionResult> DeleteForm(int id)
         {
             var form = await _context.Forms.FindAsync(id);
             if (form == null)
@@ -142,7 +166,7 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(new { message = "Form soft-deleted", formId = id });
         }
 
-        private bool FormExists(string id)
+        private bool FormExists(int id)
         {
             return _context.Forms.Any(f => f.FormId == id);
         }

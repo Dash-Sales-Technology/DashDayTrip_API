@@ -1,5 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+
 
 namespace Dash_DayTrip_API.Models
 {
@@ -7,9 +8,10 @@ namespace Dash_DayTrip_API.Models
     public class Order
     {
         [Key]
-        public string OrderId { get; set; } = string.Empty;
+        [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
+        public int OrderId { get; set; }
 
-        public string FormId { get; set; } = string.Empty;
+        public int FormId { get; set; }
         public string MerchantId { get; set; } = string.Empty;
         public string ReferenceNumber { get; set; } = string.Empty;
         public string Status { get; set; } = "pending";
@@ -44,6 +46,10 @@ namespace Dash_DayTrip_API.Models
         public string? Notes { get; set; }
         public string? PaymentReceipt { get; set; }
 
+        // New fields
+        public string? PaymentStatus { get; set; } = "Pending";
+        public string? AssignedSEUserId { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
@@ -54,5 +60,8 @@ namespace Dash_DayTrip_API.Models
 
         // Invoice tracking
         public DateTime? InvoiceSentAt { get; set; }
+
+        [InverseProperty("Order")]
+        public virtual Promotion? Promotion { get; set; }
     }
 }

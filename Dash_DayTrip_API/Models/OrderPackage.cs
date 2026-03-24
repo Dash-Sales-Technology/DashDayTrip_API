@@ -12,8 +12,8 @@ namespace Dash_DayTrip_API.Models
         [DatabaseGenerated(DatabaseGeneratedOption.Identity)]
         public int OrderPackageId { get; set; }
 
-        public string OrderId { get; set; } = string.Empty;
-        public string PackageId { get; set; } = string.Empty;
+        public int OrderId { get; set; }
+        public int PackageId { get; set; }
         public string PackageName { get; set; } = string.Empty;
         public int Quantity { get; set; } = 1;
         public decimal UnitPrice { get; set; }
