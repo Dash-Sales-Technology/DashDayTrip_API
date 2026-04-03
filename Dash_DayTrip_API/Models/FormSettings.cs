@@ -13,10 +13,8 @@ namespace Dash_DayTrip_API.Models
         [Required]
         public int FormId { get; set; }
 
-        // Staff Settings (stored as JSON)
         public string? SalesExecutives { get; set; }
 
-        // General Settings
         public string? TaxIdNumber { get; set; }
 
         public string? Currency { get; set; }
@@ -25,9 +23,8 @@ namespace Dash_DayTrip_API.Models
 
         public int? MaxGuestPerDay { get; set; }
 
-        // Fees & Invoicing Settings
         [MaxLength(20)]
-        public string? DepositMode { get; set; } = "fixed"; // per_pax or fixed
+        public string? DepositMode { get; set; } = "fixed";
 
         [Column(TypeName = "decimal(10,2)")]
         public decimal? DepositAmount { get; set; } = 100.00m;
@@ -37,12 +34,17 @@ namespace Dash_DayTrip_API.Models
         [Column(TypeName = "decimal(5,2)")]
         public decimal? SSTPercentage { get; set; } = 8.00m;
 
+        public string? GiftItems { get; set; }
+
+        // Per-pax gratuity charged at booking time
+        [Column(TypeName = "decimal(10,2)")]
+        public decimal? BookingGratuityAmount { get; set; }
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-        // Navigation property
         [ForeignKey("FormId")]
-        [JsonIgnore]  // Added to break circular reference for Swagger
+        [JsonIgnore]
         public virtual Form? Form { get; set; }
 
         public bool IsDeleted { get; set; }

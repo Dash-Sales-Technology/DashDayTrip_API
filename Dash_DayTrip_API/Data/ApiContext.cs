@@ -5,15 +5,16 @@ namespace Dash_DayTrip_API.Data
 {
     public class ApiContext : DbContext
     {
-        public DbSet<Form> Forms { get; set; }
-        public DbSet<FormSettings> FormSettings { get; set; }
-        public DbSet<Package> Packages { get; set; }
-        public DbSet<Order> Orders { get; set; }
-        public DbSet<OrderPackage> OrderPackages { get; set; }
-        public DbSet<Booking> Bookings { get; set; }
+        public DbSet<Form> Forms { get; set; } = null!;
+        public DbSet<FormSettings> FormSettings { get; set; } = null!;
+        public DbSet<Package> Packages { get; set; } = null!;
+        public DbSet<Order> Orders { get; set; } = null!;
+        public DbSet<OrderPackage> OrderPackages { get; set; } = null!;
+        public DbSet<OrderPayment> OrderPayments { get; set; } = null!;
+        public DbSet<Booking> Bookings { get; set; } = null!;
         public DbSet<BookingGuest> BookingGuests { get; set; } = null!;
-        public DbSet<Promotion> Promotions { get; set; }
-        public DbSet<User> Users { get; set; }
+        public DbSet<Promotion> Promotions { get; set; } = null!;
+        public DbSet<User> Users { get; set; } = null!;
 
         public ApiContext(DbContextOptions<ApiContext> options)
             : base(options)
@@ -46,8 +47,22 @@ namespace Dash_DayTrip_API.Data
             // Order configuration
             modelBuilder.Entity<Order>()
                 .HasIndex(o => o.Status);
+
             modelBuilder.Entity<Order>()
                 .HasIndex(o => o.ReferenceNumber);
+
+            modelBuilder.Entity<Order>()
+                .HasIndex(o => new { o.Source, o.PaymentStatus, o.IsDeleted });
+
+            modelBuilder.Entity<Order>()
+                .Property(o => o.Source)
+                .HasMaxLength(20)
+                .IsRequired();
+
+            modelBuilder.Entity<Order>()
+                .Property(o => o.PaymentStatus)
+                .HasMaxLength(20)
+                .IsRequired();
 
             // OrderPackage configuration
             modelBuilder.Entity<OrderPackage>()
@@ -56,12 +71,31 @@ namespace Dash_DayTrip_API.Data
                 .HasForeignKey(op => op.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // OrderPayment configuration
+            modelBuilder.Entity<OrderPayment>()
+                .HasOne(op => op.Order)
+                .WithMany(o => o.OrderPayments)
+                .HasForeignKey(op => op.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<OrderPayment>()
+                .HasIndex(op => new { op.OrderId, op.IsVoided, op.PaymentDate });
+
+            modelBuilder.Entity<OrderPayment>()
+                .HasIndex(op => new { op.OrderId, op.CreatedAt });
+
+            modelBuilder.Entity<OrderPayment>()
+                .HasIndex(op => op.IsVoided);
+
             // Booking (calendar) configuration
             modelBuilder.Entity<Booking>()
                 .HasOne(b => b.Order)
                 .WithMany()
                 .HasForeignKey(b => b.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Booking>()
+                .HasIndex(b => new { b.BookingDate, b.Status, b.IsDeleted });
 
             // BookingGuest configuration
             modelBuilder.Entity<BookingGuest>()
@@ -70,15 +104,19 @@ namespace Dash_DayTrip_API.Data
                 .HasForeignKey(bg => bg.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            // Configure decimal precision for financial fields
-            ConfigureDecimalPrecision(modelBuilder);
-
-            // Promotion configuration
+            // Promotion configuration (one promotion record per order)
             modelBuilder.Entity<Order>()
                 .HasOne(o => o.Promotion)
                 .WithOne(p => p.Order)
                 .HasForeignKey<Promotion>(p => p.OrderId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<Promotion>()
+                .HasIndex(p => p.OrderId)
+                .IsUnique();
+
+            // Configure decimal precision for financial fields
+            ConfigureDecimalPrecision(modelBuilder);
 
             // Global query filters to automatically skip soft-deleted rows
             modelBuilder.Entity<Order>().HasQueryFilter(o => !o.IsDeleted);
@@ -92,13 +130,15 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
         }
 
-        private void ConfigureDecimalPrecision(ModelBuilder modelBuilder)
+        private static void ConfigureDecimalPrecision(ModelBuilder modelBuilder)
         {
             // FormSettings decimals
             modelBuilder.Entity<FormSettings>()
                 .Property(fs => fs.DepositAmount).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<FormSettings>()
                 .Property(fs => fs.SSTPercentage).HasColumnType("decimal(5,2)");
+            modelBuilder.Entity<FormSettings>()
+                .Property(fs => fs.BookingGratuityAmount).HasColumnType("decimal(10,2)");
 
             // Package decimals
             modelBuilder.Entity<Package>()
@@ -108,7 +148,7 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<Package>()
                 .Property(p => p.GratuityAmount).HasColumnType("decimal(10,2)");
 
-            // Order decimals (was Booking)
+            // Order decimals
             modelBuilder.Entity<Order>()
                 .Property(o => o.Subtotal).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<Order>()
@@ -120,9 +160,11 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<Order>()
                 .Property(o => o.DepositPaid).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<Order>()
+                .Property(o => o.AmountPaid).HasColumnType("decimal(10,2)");
+            modelBuilder.Entity<Order>()
                 .Property(o => o.BalanceDue).HasColumnType("decimal(10,2)");
 
-            // OrderPackage decimals 
+            // OrderPackage decimals
             modelBuilder.Entity<OrderPackage>()
                 .Property(op => op.UnitPrice).HasColumnType("decimal(10,2)");
             modelBuilder.Entity<OrderPackage>()
@@ -132,7 +174,11 @@ namespace Dash_DayTrip_API.Data
             modelBuilder.Entity<OrderPackage>()
                 .Property(op => op.GratuityAmount).HasColumnType("decimal(10,2)");
 
-            //Promotion decimals
+            // OrderPayment decimals
+            modelBuilder.Entity<OrderPayment>()
+                .Property(op => op.Amount).HasColumnType("decimal(10,2)");
+
+            // Promotion decimals
             modelBuilder.Entity<Promotion>()
                 .Property(p => p.DiscountValue).HasColumnType("decimal(10,2)");
         }

@@ -55,10 +55,12 @@ namespace Dash_DayTrip_API.Controllers
                 existing.DepositAmount = settings.DepositAmount;
                 existing.SSTEnabled = settings.SSTEnabled;
                 existing.SSTPercentage = settings.SSTPercentage;
+                existing.GiftItems = settings.GiftItems;
                 existing.TaxIdNumber = settings.TaxIdNumber;
                 existing.Currency = settings.Currency;
                 existing.NextDayCutoffTime = settings.NextDayCutoffTime;
                 existing.MaxGuestPerDay = settings.MaxGuestPerDay;
+                existing.BookingGratuityAmount = settings.BookingGratuityAmount;
                 existing.UpdatedAt = DateTime.UtcNow;
 
                 await _context.SaveChangesAsync();

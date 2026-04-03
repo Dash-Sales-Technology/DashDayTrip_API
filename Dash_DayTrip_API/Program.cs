@@ -1,11 +1,11 @@
 using Dash_DayTrip_API.Data;
-using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Add CORS policy
+// CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -16,37 +16,66 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Add services to the container.
+// DB
 builder.Services.AddDbContext<ApiContext>(opt =>
     opt.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Add controllers with JSON options to handle circular references
+// Controllers + JSON
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
-        options.JsonSerializerOptions.DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
+        options.JsonSerializerOptions.ReferenceHandler =
+            System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+        options.JsonSerializerOptions.DefaultIgnoreCondition =
+            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
     });
 
 builder.Services.AddEndpointsApiExplorer();
 
-// Configure Swagger with custom schema ID to avoid conflicts
 builder.Services.AddSwaggerGen(c =>
 {
-    // Fix schema naming conflicts
     c.CustomSchemaIds(type => type.FullName);
 });
 
 var app = builder.Build();
 
-// Developer exception page FIRST to see actual errors
+// Global exception handler for consistent API errors
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var logger = context.RequestServices.GetRequiredService<ILoggerFactory>()
+            .CreateLogger("GlobalExceptionHandler");
+
+        var exceptionFeature = context.Features.Get<IExceptionHandlerFeature>();
+        var ex = exceptionFeature?.Error;
+
+        if (ex != null)
+        {
+            logger.LogError(ex, "Unhandled exception");
+        }
+
+        context.Response.ContentType = "application/json";
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+        await context.Response.WriteAsJsonAsync(new
+        {
+            success = false,
+            message = "An unexpected error occurred.",
+            detail = app.Environment.IsDevelopment() ? ex?.Message : null
+        });
+    });
+});
+
 if (app.Environment.IsDevelopment())
 {
-    app.UseDeveloperExceptionPage();
+    app.UseSwagger();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Dash DayTrip API v1");
+    });
 }
-
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+else
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
@@ -57,13 +86,12 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 
 app.UseStaticFiles();
 
-// Enable CORS BEFORE routing and authorization
 app.UseRouting();
 app.UseCors("AllowAll");
 
 app.UseHttpsRedirection();
-
 app.UseAuthorization();
+
 app.MapControllers();
 
 app.Run();

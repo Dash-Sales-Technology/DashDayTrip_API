@@ -1,8 +1,5 @@
 namespace Dash_DayTrip_API.Models.DTOs
 {
-    /// <summary>
-    /// DTO for Form responses - breaks circular reference for Swagger
-    /// </summary>
     public class FormDto
     {
         public int FormId { get; set; }
@@ -16,14 +13,10 @@ namespace Dash_DayTrip_API.Models.DTOs
         public string? BrandingDescription { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
-        
-        // Nested DTO instead of navigation property
+
         public FormSettingsDto? FormSettings { get; set; }
     }
 
-    /// <summary>
-    /// DTO for FormSettings - no back-reference to Form
-    /// </summary>
     public class FormSettingsDto
     {
         public int SettingId { get; set; }
@@ -37,8 +30,8 @@ namespace Dash_DayTrip_API.Models.DTOs
         public decimal? DepositAmount { get; set; }
         public bool SSTEnabled { get; set; }
         public decimal? SSTPercentage { get; set; }
+        public decimal? BookingGratuityAmount { get; set; }   
         public DateTime CreatedAt { get; set; }
         public DateTime UpdatedAt { get; set; }
-        // NO Form property here - breaks the cycle!
     }
-}   
+}

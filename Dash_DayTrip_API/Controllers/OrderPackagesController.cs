@@ -44,13 +44,79 @@ namespace Dash_DayTrip_API.Controllers
         private readonly ApiContext _context;
         private readonly ILogger<OrderPackagesController> _logger;
 
+        private const string SourceQuickBooking = "quick_booking";
+
         public OrderPackagesController(ApiContext context, ILogger<OrderPackagesController> logger)
         {
             _context = context;
             _logger = logger;
         }
 
-        // GET: api/OrderPackages
+        private static bool IsQuickBooking(string? source) =>
+            string.Equals(source?.Trim(), SourceQuickBooking, StringComparison.OrdinalIgnoreCase);
+
+        private static string ComputePaymentStatus(decimal grandTotal, decimal amountPaid)
+        {
+            if (amountPaid >= grandTotal && grandTotal > 0) return "Paid";
+            if (amountPaid > 0) return "Partial";
+            return "Pending";
+        }
+
+        private static decimal SafeMoney(decimal? value) => value.HasValue && value.Value > 0 ? value.Value : 0m;
+
+        private static string? ValidateCreatePayload(CreateOrderPackageRequest request)
+        {
+            if (request.OrderId <= 0) return "OrderId must be greater than zero.";
+            if (request.PackageId <= 0) return "PackageId must be greater than zero.";
+            if (request.Quantity <= 0) return "Quantity must be greater than zero.";
+            if (request.UnitPrice < 0) return "UnitPrice cannot be negative.";
+            if (request.NoOfPax < 0) return "NoOfPax cannot be negative.";
+            if (request.BoatFareAmount.HasValue && request.BoatFareAmount.Value < 0) return "BoatFareAmount cannot be negative.";
+            if (request.GratuityAmount.HasValue && request.GratuityAmount.Value < 0) return "GratuityAmount cannot be negative.";
+            return null;
+        }
+
+        private static string? ValidateUpdatePayload(UpdateOrderPackageRequest request)
+        {
+            if (request.Quantity.HasValue && request.Quantity.Value <= 0) return "Quantity must be greater than zero.";
+            if (request.UnitPrice.HasValue && request.UnitPrice.Value < 0) return "UnitPrice cannot be negative.";
+            if (request.NoOfPax.HasValue && request.NoOfPax.Value < 0) return "NoOfPax cannot be negative.";
+            if (request.BoatFareAmount.HasValue && request.BoatFareAmount.Value < 0) return "BoatFareAmount cannot be negative.";
+            if (request.GratuityAmount.HasValue && request.GratuityAmount.Value < 0) return "GratuityAmount cannot be negative.";
+            return null;
+        }
+
+        private async Task RecalculateOrderTotalsAsync(int orderId)
+        {
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.OrderId == orderId);
+            if (order == null) return;
+
+            var packages = await _context.OrderPackages
+                .Where(op => op.OrderId == orderId && !op.IsDeleted)
+                .ToListAsync();
+
+            var subtotal = packages.Sum(p => p.LineTotal);
+            var totalBoatFare = packages.Sum(p => p.BoatFareEnabled ? SafeMoney(p.BoatFareAmount) : 0m);
+            var totalGratuity = packages.Sum(p => p.GratuityEnabled ? SafeMoney(p.GratuityAmount) : 0m);
+            var grandTotal = subtotal + totalBoatFare + totalGratuity;
+
+            order.Subtotal = subtotal;
+            order.TotalBoatFare = totalBoatFare;
+            order.TotalGratuity = totalGratuity;
+            order.GrandTotal = grandTotal;
+
+            if (IsQuickBooking(order.Source))
+            {
+                order.DepositPaid = 0m;
+            }
+
+            order.BalanceDue = Math.Max(0m, order.GrandTotal - order.AmountPaid);
+            order.PaymentStatus = ComputePaymentStatus(order.GrandTotal, order.AmountPaid);
+            order.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+        }
+
         [HttpGet]
         public async Task<ActionResult<IEnumerable<OrderPackage>>> GetOrderPackages()
         {
@@ -61,7 +127,6 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(orderPackages);
         }
 
-        // GET: api/OrderPackages/{id}
         [HttpGet("{id}")]
         public async Task<ActionResult<OrderPackage>> GetOrderPackage(int id)
         {
@@ -76,7 +141,6 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(orderPackage);
         }
 
-        // GET: api/OrderPackages/ByOrder/{orderId}
         [HttpGet("ByOrder/{orderId}")]
         public async Task<ActionResult<IEnumerable<OrderPackage>>> GetOrderPackagesByOrder(int orderId)
         {
@@ -87,45 +151,59 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(orderPackages);
         }
 
-        // POST: api/OrderPackages
         [HttpPost]
         public async Task<ActionResult<OrderPackage>> CreateOrderPackage([FromBody] CreateOrderPackageRequest request)
         {
-            // Validate order exists
-            var orderExists = await _context.Orders.AnyAsync(o => o.OrderId == request.OrderId);
-            if (!orderExists)
-            {
+            var validationError = ValidateCreatePayload(request);
+            if (!string.IsNullOrEmpty(validationError))
+                return BadRequest(new { message = validationError });
+
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.OrderId == request.OrderId);
+            if (order == null)
                 return BadRequest(new { message = "Invalid Order ID." });
-            }
+
+            var quantity = request.Quantity;
+            var unitPrice = request.UnitPrice;
+            var boatFareEnabled = request.BoatFareEnabled;
+            var gratuityEnabled = request.GratuityEnabled;
+            var boatFareAmount = boatFareEnabled ? SafeMoney(request.BoatFareAmount) : 0m;
+            var gratuityAmount = gratuityEnabled ? SafeMoney(request.GratuityAmount) : 0m;
 
             var orderPackage = new OrderPackage
             {
                 OrderId = request.OrderId,
                 PackageId = request.PackageId,
                 PackageName = request.PackageName,
-                Quantity = request.Quantity,
-                UnitPrice = request.UnitPrice,
+                Quantity = quantity,
+                UnitPrice = unitPrice,
                 NoOfPax = request.NoOfPax,
-                BoatFareEnabled = request.BoatFareEnabled,
-                BoatFareAmount = request.BoatFareAmount,
+                BoatFareEnabled = boatFareEnabled,
+                BoatFareAmount = boatFareAmount,
                 BoatFareCalcType = request.BoatFareCalcType,
-                GratuityEnabled = request.GratuityEnabled,
-                GratuityAmount = request.GratuityAmount,
+                GratuityEnabled = gratuityEnabled,
+                GratuityAmount = gratuityAmount,
                 GratuityCalcType = request.GratuityCalcType,
-                LineTotal = request.LineTotal,
-                IsDeleted = false
+                LineTotal = quantity * unitPrice,
+                IsDeleted = false,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
             };
 
             _context.OrderPackages.Add(orderPackage);
             await _context.SaveChangesAsync();
 
+            await RecalculateOrderTotalsAsync(request.OrderId);
+
             return CreatedAtAction(nameof(GetOrderPackage), new { id = orderPackage.OrderPackageId }, orderPackage);
         }
 
-        // POST: api/OrderPackages/{id}/update
         [HttpPost("{id}/update")]
         public async Task<IActionResult> UpdateOrderPackagePost(int id, [FromBody] UpdateOrderPackageRequest request)
         {
+            var validationError = ValidateUpdatePayload(request);
+            if (!string.IsNullOrEmpty(validationError))
+                return BadRequest(new { message = validationError });
+
             var orderPackage = await _context.OrderPackages
                 .FirstOrDefaultAsync(op => op.OrderPackageId == id && !op.IsDeleted);
 
@@ -136,33 +214,45 @@ namespace Dash_DayTrip_API.Controllers
 
             if (request.PackageName is not null)
                 orderPackage.PackageName = request.PackageName;
+
             if (request.Quantity.HasValue)
                 orderPackage.Quantity = request.Quantity.Value;
+
             if (request.UnitPrice.HasValue)
                 orderPackage.UnitPrice = request.UnitPrice.Value;
+
             if (request.NoOfPax.HasValue)
                 orderPackage.NoOfPax = request.NoOfPax.Value;
+
             if (request.BoatFareEnabled.HasValue)
                 orderPackage.BoatFareEnabled = request.BoatFareEnabled.Value;
+
             if (request.BoatFareAmount.HasValue)
-                orderPackage.BoatFareAmount = request.BoatFareAmount.Value;
+                orderPackage.BoatFareAmount = request.BoatFareEnabled == false ? 0m : request.BoatFareAmount.Value;
+
             if (request.BoatFareCalcType is not null)
                 orderPackage.BoatFareCalcType = request.BoatFareCalcType;
+
             if (request.GratuityEnabled.HasValue)
                 orderPackage.GratuityEnabled = request.GratuityEnabled.Value;
+
             if (request.GratuityAmount.HasValue)
-                orderPackage.GratuityAmount = request.GratuityAmount.Value;
+                orderPackage.GratuityAmount = request.GratuityEnabled == false ? 0m : request.GratuityAmount.Value;
+
             if (request.GratuityCalcType is not null)
                 orderPackage.GratuityCalcType = request.GratuityCalcType;
-            if (request.LineTotal.HasValue)
-                orderPackage.LineTotal = request.LineTotal.Value;
+
+            // Always recompute line total server-side to avoid payload tampering.
+            orderPackage.LineTotal = orderPackage.Quantity * orderPackage.UnitPrice;
+            orderPackage.UpdatedAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+
+            await RecalculateOrderTotalsAsync(orderPackage.OrderId);
 
             return Ok(orderPackage);
         }
 
-        // POST: api/OrderPackages/{id}/delete
         [HttpPost("{id}/delete")]
         public async Task<IActionResult> DeleteOrderPackagePost(int id)
         {
@@ -173,7 +263,10 @@ namespace Dash_DayTrip_API.Controllers
             }
 
             orderPackage.IsDeleted = true;
+            orderPackage.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
+
+            await RecalculateOrderTotalsAsync(orderPackage.OrderId);
 
             return Ok(new { message = "Order package soft-deleted.", orderPackageId = id });
         }
