@@ -141,6 +141,7 @@ namespace Dash_DayTrip_API.Controllers
             };
         }
 
+
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Order>>> GetOrders()
         {
@@ -556,18 +557,22 @@ namespace Dash_DayTrip_API.Controllers
             if (request.AmountPaidNow <= 0)
                 return BadRequest(new { message = "Payment amount must be greater than zero." });
 
-            var order = await _context.Orders.FindAsync(id);
-            if (order == null)
-                return NotFound(new { message = "Order not found." });
-
-            var outstanding = Math.Max(0m, order.GrandTotal - order.AmountPaid);
-            if (request.AmountPaidNow > outstanding)
-                return BadRequest(new { message = "Payment exceeds outstanding balance." });
-
-            await using var tx = await _context.Database.BeginTransactionAsync();
+            await using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
 
             try
             {
+                var order = await _context.Orders.FirstOrDefaultAsync(o => o.OrderId == id);
+                if (order == null)
+                    return NotFound(new { message = "Order not found." });
+
+                var paidBefore = await _context.Set<OrderPayment>()
+                    .Where(p => p.OrderId == id && !p.IsVoided)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+                var outstanding = Math.Max(0m, order.GrandTotal - paidBefore);
+                if (request.AmountPaidNow > outstanding)
+                    return BadRequest(new { message = "Payment exceeds outstanding balance." });
+
                 var payment = new OrderPayment
                 {
                     OrderId = id,
@@ -639,22 +644,22 @@ namespace Dash_DayTrip_API.Controllers
         [HttpPost("payments/{paymentId}/void")]
         public async Task<IActionResult> VoidOrderPayment(int paymentId, [FromBody] VoidOrderPaymentRequest request)
         {
-            var payment = await _context.Set<OrderPayment>()
-                .FirstOrDefaultAsync(p => p.OrderPaymentId == paymentId);
-
-            if (payment == null)
-                return NotFound(new { message = "Payment not found." });
-
-            if (payment.IsVoided)
-                return BadRequest(new { message = "Payment is already voided." });
-
             if (string.IsNullOrWhiteSpace(request?.VoidReason))
                 return BadRequest(new { message = "VoidReason is required." });
 
-            await using var tx = await _context.Database.BeginTransactionAsync();
+            await using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
 
             try
             {
+                var payment = await _context.Set<OrderPayment>()
+                    .FirstOrDefaultAsync(p => p.OrderPaymentId == paymentId);
+
+                if (payment == null)
+                    return NotFound(new { message = "Payment not found." });
+
+                if (payment.IsVoided)
+                    return BadRequest(new { message = "Payment is already voided." });
+
                 payment.IsVoided = true;
                 payment.VoidedAt = DateTime.UtcNow;
                 payment.VoidedBy = request?.VoidedBy;

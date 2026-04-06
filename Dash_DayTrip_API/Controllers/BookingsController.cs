@@ -28,6 +28,19 @@ namespace Dash_DayTrip_API.Controllers
         public string? CancellationReason { get; set; }
     }
 
+    public class ApplyBookingPaymentRequest
+    {
+        public decimal AmountPaidNow { get; set; }
+        public string? PaymentMethod { get; set; }
+        public string? TransactionRef { get; set; }
+    }
+
+    public class VoidBookingPaymentRequest
+    {
+        public string? VoidedBy { get; set; }
+        public string? VoidReason { get; set; }
+    }
+
     [Route("api/[controller]")]
     [ApiController]
     public class BookingsController : ControllerBase
@@ -53,6 +66,59 @@ namespace Dash_DayTrip_API.Controllers
             return AllowedBookingStatuses.Contains(normalized) ? normalized : string.Empty;
         }
 
+        private static string ComputePaymentStatus(decimal targetAmount, decimal amountPaid)
+        {
+            if (targetAmount <= 0m) return "Paid";
+            if (amountPaid >= targetAmount) return "Paid";
+            if (amountPaid > 0m) return "Partial";
+            return "Pending";
+        }
+
+        private async Task<object?> BuildBookingPaymentSummaryAsync(int bookingId)
+        {
+            var booking = await _context.Bookings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.BookingId == bookingId && !b.IsDeleted);
+
+            if (booking == null) return null;
+
+            if (booking.IsFirstBooking)
+            {
+                var order = await _context.Orders.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.OrderId == booking.OrderId);
+
+                return new
+                {
+                    bookingId = booking.BookingId,
+                    orderId = booking.OrderId,
+                    isFirstBooking = true,
+                    gratuityTarget = booking.GratuityFee,
+                    amountPaid = order?.AmountPaid ?? 0m,
+                    balanceDue = order?.BalanceDue ?? 0m,
+                    paymentStatus = order?.PaymentStatus ?? "Pending",
+                    routeHint = $"/api/Orders/{booking.OrderId}/payment"
+                };
+            }
+
+            var paid = await _context.BookingPayments
+                .Where(p => p.BookingId == bookingId && !p.IsVoided)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            var target = Math.Max(0m, booking.GratuityFee);
+            var balance = Math.Max(0m, target - paid);
+
+            return new
+            {
+                bookingId = booking.BookingId,
+                orderId = booking.OrderId,
+                isFirstBooking = false,
+                gratuityTarget = target,
+                amountPaid = paid,
+                balanceDue = balance,
+                paymentStatus = ComputePaymentStatus(target, paid)
+            };
+        }
+
         private async Task<(int maxPax, decimal gratuityPerPax)> GetFormSettingsValuesAsync(int orderId)
         {
             var order = await _context.Orders.AsNoTracking()
@@ -68,6 +134,47 @@ namespace Dash_DayTrip_API.Controllers
             decimal gratuity = settings?.BookingGratuityAmount ?? DEFAULT_GRATUITY_PER_PAX;
 
             return (maxPax, gratuity);
+        }
+
+        private async Task RecalculateOrderFinancialsAsync(int orderId)
+        {
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.OrderId == orderId);
+            if (order == null) return;
+
+            // Only first confirmed booking gratuity contributes to order ledger totals.
+            var firstBookingGratuity = await _context.Bookings
+                .Where(b => b.OrderId == orderId &&
+                            !b.IsDeleted &&
+                            b.Status == "confirmed" &&
+                            b.IsFirstBooking)
+                .SumAsync(b => (decimal?)b.GratuityFee) ?? 0m;
+
+            order.TotalGratuity = firstBookingGratuity;
+            order.GrandTotal = order.Subtotal + order.TotalBoatFare + firstBookingGratuity;
+
+            var totalPaid = await _context.OrderPayments
+                .Where(p => p.OrderId == orderId && !p.IsVoided)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            order.AmountPaid = totalPaid;
+            order.BalanceDue = Math.Max(0m, order.GrandTotal - totalPaid);
+            order.PaymentStatus = totalPaid <= 0m
+                ? "Pending"
+                : order.BalanceDue <= 0m
+                    ? "Paid"
+                    : "Partial";
+
+            var latestPayment = await _context.OrderPayments
+                .Where(p => p.OrderId == orderId && !p.IsVoided)
+                .OrderByDescending(p => p.PaymentDate)
+                .ThenByDescending(p => p.OrderPaymentId)
+                .FirstOrDefaultAsync();
+
+            order.PaymentMethod = latestPayment?.PaymentMethod;
+            order.TransactionRef = latestPayment?.TransactionRef;
+            order.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
         }
 
         [HttpGet]
@@ -174,6 +281,148 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(data);
         }
 
+        [HttpPost("{id}/payment")]
+        public async Task<IActionResult> ApplyBookingPayment(int id, [FromBody] ApplyBookingPaymentRequest request)
+        {
+            if (request.AmountPaidNow <= 0m)
+                return BadRequest(new { message = "Payment amount must be greater than zero." });
+
+            await using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
+            try
+            {
+                var booking = await _context.Bookings
+                    .FirstOrDefaultAsync(b => b.BookingId == id && !b.IsDeleted);
+
+                if (booking == null)
+                    return NotFound(new { message = "Booking not found." });
+
+                if (!string.Equals(booking.Status, "confirmed", StringComparison.OrdinalIgnoreCase))
+                    return BadRequest(new { message = "Only confirmed bookings can receive payments." });
+
+                if (booking.IsFirstBooking)
+                {
+                    return BadRequest(new
+                    {
+                        message = "First booking payment is order-level. Use order payment endpoint.",
+                        routeHint = $"/api/Orders/{booking.OrderId}/payment"
+                    });
+                }
+
+                var paidBefore = await _context.BookingPayments
+                    .Where(p => p.BookingId == id && !p.IsVoided)
+                    .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+                var target = Math.Max(0m, booking.GratuityFee);
+                var outstanding = Math.Max(0m, target - paidBefore);
+
+                if (request.AmountPaidNow > outstanding)
+                    return BadRequest(new { message = "Payment exceeds outstanding balance." });
+
+                var payment = new BookingPayment
+                {
+                    BookingId = booking.BookingId,
+                    OrderId = booking.OrderId,
+                    Amount = request.AmountPaidNow,
+                    PaymentMethod = string.IsNullOrWhiteSpace(request.PaymentMethod) ? null : request.PaymentMethod,
+                    TransactionRef = string.IsNullOrWhiteSpace(request.TransactionRef) ? null : request.TransactionRef,
+                    PaymentDate = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    IsVoided = false
+                };
+
+                _context.BookingPayments.Add(payment);
+                await _context.SaveChangesAsync();
+
+                var summary = await BuildBookingPaymentSummaryAsync(id);
+                await tx.CommitAsync();
+
+                return Ok(new
+                {
+                    message = "Booking gratuity payment applied successfully.",
+                    bookingPaymentId = payment.BookingPaymentId,
+                    bookingSummary = summary
+                });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError(ex, "ApplyBookingPayment failed for booking {BookingId}", id);
+                return StatusCode(500, new { message = "Failed to apply booking payment.", error = ex.Message });
+            }
+        }
+
+        [HttpGet("{id}/payments")]
+        public async Task<IActionResult> GetBookingPayments(int id)
+        {
+            var booking = await _context.Bookings
+                .AsNoTracking()
+                .FirstOrDefaultAsync(b => b.BookingId == id && !b.IsDeleted);
+
+            if (booking == null)
+                return NotFound(new { message = "Booking not found." });
+
+            var payments = await _context.BookingPayments
+                .Where(p => p.BookingId == id)
+                .OrderByDescending(p => p.PaymentDate)
+                .ThenByDescending(p => p.BookingPaymentId)
+                .ToListAsync();
+
+            var summary = await BuildBookingPaymentSummaryAsync(id);
+
+            return Ok(new
+            {
+                bookingId = id,
+                isFirstBooking = booking.IsFirstBooking,
+                payments,
+                summary
+            });
+        }
+
+        [HttpPost("payments/{paymentId}/void")]
+        public async Task<IActionResult> VoidBookingPayment(int paymentId, [FromBody] VoidBookingPaymentRequest request)
+        {
+            if (string.IsNullOrWhiteSpace(request?.VoidReason))
+                return BadRequest(new { message = "VoidReason is required." });
+
+            await using var tx = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+
+            try
+            {
+                var payment = await _context.BookingPayments
+                    .FirstOrDefaultAsync(p => p.BookingPaymentId == paymentId);
+
+                if (payment == null)
+                    return NotFound(new { message = "Booking payment not found." });
+
+                if (payment.IsVoided)
+                    return BadRequest(new { message = "Booking payment is already voided." });
+
+                payment.IsVoided = true;
+                payment.VoidedAt = DateTime.UtcNow;
+                payment.VoidedBy = request?.VoidedBy;
+                payment.VoidReason = request?.VoidReason;
+
+                await _context.SaveChangesAsync();
+
+                var summary = await BuildBookingPaymentSummaryAsync(payment.BookingId);
+                await tx.CommitAsync();
+
+                return Ok(new
+                {
+                    message = "Booking payment voided successfully.",
+                    bookingPaymentId = payment.BookingPaymentId,
+                    bookingSummary = summary
+                });
+            }
+            catch (Exception ex)
+            {
+                await tx.RollbackAsync();
+                _logger.LogError(ex, "VoidBookingPayment failed for payment {PaymentId}", paymentId);
+                return StatusCode(500, new { message = "Failed to void booking payment.", error = ex.Message });
+            }
+        }
+
         [HttpPost]
         public async Task<ActionResult<Booking>> CreateBooking([FromBody] CreateBookingRequest request)
         {
@@ -193,11 +442,7 @@ namespace Dash_DayTrip_API.Controllers
             if (order == null)
                 return BadRequest(new { message = "Invalid Order ID." });
 
-            var formSettings = await _context.FormSettings.AsNoTracking()
-                .FirstOrDefaultAsync(fs => fs.FormId == order.FormId);
-
-            int maxPax = formSettings?.MaxGuestPerDay ?? DEFAULT_MAX_PAX;
-            decimal gratuityPerPax = formSettings?.BookingGratuityAmount ?? DEFAULT_GRATUITY_PER_PAX;
+            var (maxPax, gratuityPerPax) = await GetFormSettingsValuesAsync(request.OrderId);
 
             var currentPax = await _context.Bookings
                 .Where(b => b.BookingDate.Date == request.BookingDate.Date &&
@@ -215,9 +460,9 @@ namespace Dash_DayTrip_API.Controllers
                 });
             }
 
-            bool hasExistingConfirmed = await _context.Bookings
+            bool hasFirstBooking = await _context.Bookings
                 .AnyAsync(b => b.OrderId == request.OrderId &&
-                               b.Status == "confirmed" &&
+                               b.IsFirstBooking &&
                                !b.IsDeleted);
 
             var booking = new Booking
@@ -229,13 +474,15 @@ namespace Dash_DayTrip_API.Controllers
                 CreatedAt = DateTime.UtcNow,
                 IsDeleted = false,
                 GratuityFee = request.PaxCount * gratuityPerPax,
-                IsFirstBooking = !hasExistingConfirmed,
+                IsFirstBooking = !hasFirstBooking,
                 PackageId = request.PackageId,
                 PackageName = request.PackageName
             };
 
             _context.Bookings.Add(booking);
             await _context.SaveChangesAsync();
+
+            await RecalculateOrderFinancialsAsync(booking.OrderId);
 
             return Ok(booking);
         }
@@ -279,12 +526,15 @@ namespace Dash_DayTrip_API.Controllers
                 }
             }
 
+            var (_, gratuityPerPax) = await GetFormSettingsValuesAsync(booking.OrderId);
+
             if (request.BookingDate.HasValue)
                 booking.BookingDate = request.BookingDate.Value.Date;
 
             if (request.PaxCount.HasValue)
                 booking.PaxCount = request.PaxCount.Value;
 
+            booking.GratuityFee = booking.PaxCount * gratuityPerPax;
             booking.Status = targetStatus;
 
             if (targetStatus == "cancelled")
@@ -299,6 +549,7 @@ namespace Dash_DayTrip_API.Controllers
             }
 
             await _context.SaveChangesAsync();
+            await RecalculateOrderFinancialsAsync(booking.OrderId);
 
             return Ok(new
             {
@@ -320,6 +571,8 @@ namespace Dash_DayTrip_API.Controllers
             booking.IsDeleted = true;
             await _context.SaveChangesAsync();
 
+            await RecalculateOrderFinancialsAsync(booking.OrderId);
+
             return Ok(new { message = "Booking soft-deleted", bookingId = id });
         }
 
@@ -338,6 +591,7 @@ namespace Dash_DayTrip_API.Controllers
             booking.CancelledAt = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
+            await RecalculateOrderFinancialsAsync(booking.OrderId);
 
             return Ok(new
             {
@@ -383,6 +637,7 @@ namespace Dash_DayTrip_API.Controllers
             booking.CancelledAt = null;
 
             await _context.SaveChangesAsync();
+            await RecalculateOrderFinancialsAsync(booking.OrderId);
 
             return Ok(new
             {

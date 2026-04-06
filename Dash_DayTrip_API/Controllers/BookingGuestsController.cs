@@ -21,13 +21,67 @@ namespace Dash_DayTrip_API.Controllers
         private readonly ApiContext _context;
         private readonly ILogger<BookingGuestsController> _logger;
 
+        private const decimal DEFAULT_GRATUITY_PER_PAX = 5.0m;
+
         public BookingGuestsController(ApiContext context, ILogger<BookingGuestsController> logger)
         {
             _context = context;
             _logger = logger;
         }
 
-        // GET: api/BookingGuests/by-booking/{bookingId}
+        private async Task<decimal> GetGratuityPerPaxAsync(int orderId)
+        {
+            var order = await _context.Orders.AsNoTracking()
+                .FirstOrDefaultAsync(o => o.OrderId == orderId);
+            if (order == null) return DEFAULT_GRATUITY_PER_PAX;
+
+            var settings = await _context.FormSettings.AsNoTracking()
+                .FirstOrDefaultAsync(fs => fs.FormId == order.FormId);
+
+            return settings?.BookingGratuityAmount ?? DEFAULT_GRATUITY_PER_PAX;
+        }
+
+        private async Task RecalculateOrderFinancialsAsync(int orderId)
+        {
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.OrderId == orderId);
+            if (order == null) return;
+
+            // Only first confirmed booking gratuity contributes to order ledger totals.
+            var firstBookingGratuity = await _context.Bookings
+                .Where(b => b.OrderId == orderId &&
+                            !b.IsDeleted &&
+                            b.Status == "confirmed" &&
+                            b.IsFirstBooking)
+                .SumAsync(b => (decimal?)b.GratuityFee) ?? 0m;
+
+            order.TotalGratuity = firstBookingGratuity;
+            order.GrandTotal = order.Subtotal + order.TotalBoatFare + firstBookingGratuity;
+
+            var totalPaid = await _context.OrderPayments
+                .Where(p => p.OrderId == orderId && !p.IsVoided)
+                .SumAsync(p => (decimal?)p.Amount) ?? 0m;
+
+            order.AmountPaid = totalPaid;
+            order.BalanceDue = Math.Max(0m, order.GrandTotal - totalPaid);
+            order.PaymentStatus = totalPaid <= 0m
+                ? "Pending"
+                : order.BalanceDue <= 0m
+                    ? "Paid"
+                    : "Partial";
+
+            var latestPayment = await _context.OrderPayments
+                .Where(p => p.OrderId == orderId && !p.IsVoided)
+                .OrderByDescending(p => p.PaymentDate)
+                .ThenByDescending(p => p.OrderPaymentId)
+                .FirstOrDefaultAsync();
+
+            order.PaymentMethod = latestPayment?.PaymentMethod;
+            order.TransactionRef = latestPayment?.TransactionRef;
+            order.UpdatedAt = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+        }
+
         [HttpGet("by-booking/{bookingId}")]
         public async Task<ActionResult<IEnumerable<BookingGuest>>> GetGuestsByBooking(int bookingId)
         {
@@ -47,7 +101,6 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(guests);
         }
 
-        // POST: api/BookingGuests/{bookingId}
         [HttpPost("{bookingId}")]
         public async Task<ActionResult<IEnumerable<BookingGuest>>> AddGuests(
             int bookingId,
@@ -76,24 +129,20 @@ namespace Dash_DayTrip_API.Controllers
                 guests.Add(guest);
             }
 
-            // ⭐ STEP 1: Save the new guest records first
             await _context.SaveChangesAsync();
 
-            // ⭐ STEP 2: RE-SYNC PAX COUNT
-            // We count the total number of guests currently in the DB for this booking
-            // This prevents "Double Counting" if the booking already had an initial PaxCount.
             booking.PaxCount = await _context.BookingGuests
                 .CountAsync(g => g.BookingId == bookingId && !g.IsDeleted);
 
-            // ⭐ STEP 3: RECALCULATE GRATUITY
-            booking.GratuityFee = booking.PaxCount * 5.0m;
+            var gratuityPerPax = await GetGratuityPerPaxAsync(booking.OrderId);
+            booking.GratuityFee = booking.PaxCount * gratuityPerPax;
 
             await _context.SaveChangesAsync();
+            await RecalculateOrderFinancialsAsync(booking.OrderId);
 
             return Ok(guests);
         }
 
-        // POST: api/BookingGuests/{guestId}/update
         [HttpPost("{guestId}/update")]
         public async Task<ActionResult<BookingGuest>> UpdateGuest(
             int guestId,
@@ -119,7 +168,6 @@ namespace Dash_DayTrip_API.Controllers
             return Ok(guest);
         }
 
-        // POST: api/BookingGuests/{guestId}/delete
         [HttpPost("{guestId}/delete")]
         public async Task<IActionResult> DeleteGuest(int guestId)
         {
@@ -130,26 +178,21 @@ namespace Dash_DayTrip_API.Controllers
 
             var booking = await _context.Bookings.FindAsync(guest.BookingId);
 
-            // ⭐ STEP 1: Soft-delete the guest
             guest.IsDeleted = true;
             guest.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            // ⭐ STEP 2: RE-SYNC PAX COUNT
-            // After deletion, we recount the remaining active guests
             if (booking != null)
             {
                 booking.PaxCount = await _context.BookingGuests
                     .CountAsync(g => g.BookingId == booking.BookingId && !g.IsDeleted);
 
-                // ⭐ STEP 3: RECALCULATE GRATUITY
-                booking.GratuityFee = booking.PaxCount * 5.0m;
+                var gratuityPerPax = await GetGratuityPerPaxAsync(booking.OrderId);
+                booking.GratuityFee = booking.PaxCount * gratuityPerPax;
 
-                // Optional: If you want to auto-delete empty bookings:
-                // if (booking.PaxCount == 0) booking.IsDeleted = true;
+                await _context.SaveChangesAsync();
+                await RecalculateOrderFinancialsAsync(booking.OrderId);
             }
-
-            await _context.SaveChangesAsync();
 
             return Ok(new { message = "Guest removed and pax count synced", bookingId = guest.BookingId });
         }

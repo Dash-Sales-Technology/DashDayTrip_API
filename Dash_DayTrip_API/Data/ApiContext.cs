@@ -13,6 +13,7 @@ namespace Dash_DayTrip_API.Data
         public DbSet<OrderPayment> OrderPayments { get; set; } = null!;
         public DbSet<Booking> Bookings { get; set; } = null!;
         public DbSet<BookingGuest> BookingGuests { get; set; } = null!;
+        public DbSet<BookingPayment> BookingPayments { get; set; } = null!;
         public DbSet<Promotion> Promotions { get; set; } = null!;
         public DbSet<User> Users { get; set; } = null!;
 
@@ -104,6 +105,28 @@ namespace Dash_DayTrip_API.Data
                 .HasForeignKey(bg => bg.BookingId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            // BookingPayment configuration
+            modelBuilder.Entity<BookingPayment>()
+                .HasOne(bp => bp.Booking)
+                .WithMany()
+                .HasForeignKey(bp => bp.BookingId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<BookingPayment>()
+                .HasOne(bp => bp.Order)
+                .WithMany()
+                .HasForeignKey(bp => bp.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<BookingPayment>()
+                .HasIndex(bp => new { bp.BookingId, bp.IsVoided, bp.PaymentDate });
+
+            modelBuilder.Entity<BookingPayment>()
+                .HasIndex(bp => new { bp.OrderId, bp.IsVoided, bp.PaymentDate });
+
+            modelBuilder.Entity<BookingPayment>()
+                .HasIndex(bp => bp.TransactionRef);
+
             // Promotion configuration (one promotion record per order)
             modelBuilder.Entity<Order>()
                 .HasOne(o => o.Promotion)
@@ -177,6 +200,10 @@ namespace Dash_DayTrip_API.Data
             // OrderPayment decimals
             modelBuilder.Entity<OrderPayment>()
                 .Property(op => op.Amount).HasColumnType("decimal(10,2)");
+
+            // BookingPayment decimals
+            modelBuilder.Entity<BookingPayment>()
+                .Property(bp => bp.Amount).HasColumnType("decimal(10,2)");
 
             // Promotion decimals
             modelBuilder.Entity<Promotion>()
